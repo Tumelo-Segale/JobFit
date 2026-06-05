@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>JobFit - Private ATS Analysis</title>
+  <link rel="icon" type="image/png" href="icon.png" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+
+<body>
+
+  <!-- ── Header ──────────────────────────────────── -->
+  <header role="banner">
+    <div class="header-inner">
+      <div class="flex items-center gap-3">
+        <div class="logo-box" aria-hidden="true">
+          <img src="icon.png" alt="" width="22" height="22" />
+        </div>
+        <div>
+          <div class="logo-name" aria-label="JobFit">JobFit<span aria-hidden="true">.</span></div>
+          <div class="logo-sub">Private ATS Analysis</div>
+        </div>
+      </div>
+      <div class="header-actions">
+        <a href="mailto:tujar.developer@gmail.com?subject=JobFit%20Feedback" class="feedback-link" title="Send feedback"
+          aria-label="Send feedback">
+          <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" fill="none" viewBox="0 0 24 24"
+            stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path stroke-linecap="round" stroke-linejoin="round"
+              d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+          </svg>
+          Feedback
+        </a>
+      </div>
+    </div>
+  </header>
+
+  <!-- ── Main ────────────────────────────────────── -->
+  <main id="main-content" role="main">
+
+    <!-- Hero -->
+    <div id="hero" class="anim-down">
+      <h2>Private ATS Analysis.<br /><span class="hero-sub">Your CV never leaves your browser.</span></h2>
+      <p class="subtext">Optimize compatibility scores, debug formatting, audit date structures, and map keyword match
+        ratios locally. Free, offline-first, and 100% private.</p>
+    </div>
+
+    <!-- Workspace card -->
+    <div class="card" role="region" aria-label="CV Analysis Workspace">
+
+      <!-- ── Upload section ──────────────────────── -->
+      <div id="upload-section" class="anim-in">
+        <div class="section-header">
+          <div>
+            <h2 class="section-title">
+              <svg class="badge-icon" xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="none"
+                viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <path stroke-linecap="round" stroke-linejoin="round"
+                  d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
+              </svg>
+              ATS Optimizer Gateway
+            </h2>
+            <p class="section-subtitle">Zero network callbacks. Real-time scanning using local browser algorithms.</p>
+          </div>
+        </div>
+
+        <div class="upload-grid">
+          <!-- CV Input -->
+          <div class="upload-col">
+            <div class="step-label">
+              <span>Step 1: Provide Your CV / Resume</span>
+              <div class="toggle-pill" role="group" aria-label="Input method">
+                <button id="mode-upload" class="active" aria-pressed="true">File Drop</button>
+                <button id="mode-text" aria-pressed="false">Direct Editor</button>
+              </div>
+            </div>
+
+            <!-- Dropzone -->
+            <div id="dropzone-wrap">
+              <div class="dropzone" id="dropzone" role="region" aria-label="File upload area">
+                <input type="file" id="file-input" accept=".pdf,.docx,.txt,.rtf" aria-label="Upload CV file" />
+                <div class="dz-icon" aria-hidden="true">
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"
+                    stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round"
+                      d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                  </svg>
+                </div>
+                <div class="dz-title" id="dz-title">Drag &amp; Drop your resume here</div>
+                <div class="dz-sub" id="dz-sub">Or click to browse. PDF, DOCX, RTF, or TXT.</div>
+                <div class="dz-badges" id="dz-badges" aria-label="Supported file types">
+                  <span class="dz-badge">PDF</span>
+                  <span class="dz-badge">DOCX</span>
+                  <span class="dz-badge">RTF</span>
+                  <span class="dz-badge">TXT</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Text editor -->
+            <div id="textarea-wrap" class="hidden">
+              <textarea class="cv-textarea" id="cv-textarea" spellcheck="true"
+                placeholder="Paste your CV text here. You can also paste directly from LinkedIn's profile export..."
+                aria-label="CV text input"></textarea>
+              <div class="char-count" aria-live="polite">
+                <span id="cv-chars">Characters: 0</span>
+                <span id="cv-words">Words: 0</span>
+              </div>
+            </div>
+
+            <!-- Feedback -->
+            <div id="feedback-wrap" aria-live="polite"></div>
+          </div>
+
+          <!-- Job Description -->
+          <div class="upload-col">
+            <div class="step-label">
+              <span>Step 2: Paste Job Description <span class="opt">(Optional)</span></span>
+            </div>
+            <div class="jd-wrap">
+              <textarea class="jd-textarea" id="jd-textarea" spellcheck="false"
+                placeholder="Paste the target job description to compute keyword match ratios, identify missing skills, and calculate role alignment…"
+                aria-label="Job description input"></textarea>
+              <button class="clear-btn hidden" id="jd-clear" aria-label="Clear job description">Clear</button>
+            </div>
+            <div class="char-count" aria-live="polite">
+              <span id="jd-chars">Characters: 0</span>
+              <span class="kw-local">Stem-matched keywords, computed locally</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="cta-wrap">
+          <button class="cta-btn disabled" id="analyze-btn" disabled aria-label="Run ATS analysis">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24"
+              stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path stroke-linecap="round" stroke-linejoin="round"
+                d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            </svg>
+            Perform ATS Check
+          </button>
+        </div>
+      </div>
+
+      <!-- ── Dashboard ────────────────────────────── -->
+      <div id="dashboard-section" class="hidden" role="region" aria-label="Analysis Results"></div>
+
+    </div><!-- /card -->
+
+    <!-- Explainer -->
+    <div class="explainer" id="explainer-block">
+      <div class="card-sm">
+        <h3 class="explainer-heading">
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"
+            aria-hidden="true">
+            <circle cx="12" cy="12" r="10" />
+            <path stroke-linecap="round" stroke-linejoin="round" d="M12 16v-4m0-4h.01" />
+          </svg>
+          How does JobFit compute scores securely offline?
+        </h3>
+        <div class="explainer-grid">
+          <div class="explainer-step">
+            <span class="step-tag">1. Direct Extractor</span>
+            <p class="step-desc">PDF.js and Mammoth extract raw text from file blobs in your browser. No servers
+              queried.</p>
+          </div>
+          <div class="explainer-step">
+            <span class="step-tag">2. Pattern Processor</span>
+            <p class="step-desc">Local heuristics scan formatting, filenames, date patterns, and section structure.</p>
+          </div>
+          <div class="explainer-step">
+            <span class="step-tag">3. Stem-Matched Keywords</span>
+            <p class="step-desc">JD keywords are Porter-stemmed so "engineer" matches "engineering". All computed
+              locally.</p>
+          </div>
+        </div>
+        <div class="explainer-disclaimer">
+          <strong>Methodology note:</strong> JobFit uses heuristic pattern analysis - not semantic AI or an actual ATS
+          system. Scores are directional indicators of structural quality, not guarantees of interview success.
+        </div>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- ── Footer ──────────────────────────────────── -->
+  <footer role="contentinfo">
+    <div class="footer-inner">
+      <div><strong>JobFit.</strong> Privacy-First ATS CV Scorer. All analysis is local.</div>
+      <div class="footer-links">
+        <a href="mailto:tujar.developer@gmail.com?subject=JobFit%20Feedback" class="footer-link">Send Feedback</a>
+      </div>
+    </div>
+  </footer>
+
+  <script src="pdf.min.js"></script>
+  <script src="mammoth.browser.min.js"></script>
+  <script src="script.js"></script>
+
+</body>
+
+</html>
