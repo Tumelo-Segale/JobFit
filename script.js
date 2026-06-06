@@ -2406,6 +2406,10 @@ document.addEventListener("DOMContentLoaded", function () {
           state.jobDescription
         );
         showDashboard(result);
+        // Ping the counter Worker — increments the KV count for each successful analysis
+        fetch("https://jobfit-counter.tumelo-segale.workers.dev/ping", {
+          method: "POST",
+        }).catch(() => {});
       } catch (err) {
         console.error(err);
         showFeedback("error", "Analysis failed. Please try again.");
