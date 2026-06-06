@@ -2409,7 +2409,17 @@ document.addEventListener("DOMContentLoaded", function () {
         // Ping the counter Worker — increments the KV count for each successful analysis
         fetch("https://jobfit-counter.tumelo-segale.workers.dev/ping", {
           method: "POST",
-        }).catch(() => {});
+        })
+          .then(() =>
+            fetch("https://jobfit-counter.tumelo-segale.workers.dev/")
+          )
+          .then((r) => r.json())
+          .then((data) => {
+            const el = document.getElementById("cv-counter-value");
+            if (el && data.count != null)
+              el.textContent = Number(data.count).toLocaleString();
+          })
+          .catch(() => {});
       } catch (err) {
         console.error(err);
         showFeedback("error", "Analysis failed. Please try again.");
