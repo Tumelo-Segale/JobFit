@@ -2367,7 +2367,7 @@ footer {
 }
 
 .cv-counter-popup-inner {
-  background: var(--card2);
+  background: var(--card2) !important;
   border: 1px solid var(--border2);
   border-radius: 12px;
   padding: 14px 16px;
@@ -2410,7 +2410,7 @@ footer {
   transform: translateX(-50%);
   width: 12px;
   height: 6px;
-  background: var(--card2);
+  background: var(--card2) !important;
   clip-path: polygon(0% 100%, 50% 0%, 100% 100%);
   border-top: 1px solid var(--border2);
 }
