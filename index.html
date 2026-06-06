@@ -47,7 +47,7 @@
       <!-- CV counter -->
       <div class="cv-counter-row">
         <span class="cv-counter-label">CVs analysed globally</span>
-        <span class="cv-counter-value" id="cv-counter-value">-</span>
+        <span class="cv-counter-value" id="cv-counter-value">—</span>
         <button class="cv-counter-hint" id="cv-counter-hint-btn" aria-label="Privacy note about counter"
           aria-expanded="false">
           <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" viewBox="0 0 24 24"
@@ -67,7 +67,7 @@
               </svg>
               Zero personal data collected
             </div>
-            <p>This counter uses Cloudflare Web Analytics - an anonymous, privacy-respecting hit counter. It records
+            <p>This counter uses Cloudflare Web Analytics — an anonymous, privacy-respecting hit counter. It records
               <strong>only that a CV was submitted</strong>. No file contents, no resume text, no IP address, no
               cookies, and no personal identifiers are ever transmitted or stored.
             </p>
@@ -232,50 +232,24 @@
   <script defer src="https://static.cloudflareinsights.com/beacon.min.js"
     data-cf-beacon='{"token": "405d07f37f0e4805a6ee9b49be011d7a"}'></script>
 
-  <!-- CV counter: reads Cloudflare Analytics API and increments on each analysis -->
+  <!-- CV counter: fetches from the jobfit-counter Worker proxy (token never reaches browser) -->
   <script>
     (function () {
-      // Fetch approximate count from Cloudflare Analytics API
-      // This is a display-only pull; the beacon above does the actual counting.
       async function loadCounter() {
         const el = document.getElementById('cv-counter-value');
         if (!el) return;
         try {
-          // Cloudflare Analytics API (GraphQL)
-          const accountId = 'cfk_0f762hDVhnHMAsCY1gWs1pWenHbhdG5LRDyEtUSbd2a5543d';
-          const apiToken = 'cfut_LhzOBGvRGTsewhU7dXcHAZzAhv1ETvOyoX9fI6p5c8d33a25';
-          const query = JSON.stringify({
-            query: `{
-              viewer {
-                accounts(filter: { accountTag: $accountTag }) {
-                  total: rumPageloadEventsAdaptiveGroups(
-                    filter: { AND: [{ requestPath: "/" }] }
-                    limit: 1
-                    orderBy: [count_DESC]
-                  ) { count }
-                }
-              }
-            }`,
-            variables: { accountTag: accountId }
-          });
-          const res = await fetch('https://api.cloudflare.com/client/v4/graphql', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${apiToken}`
-            },
-            body: query
-          });
+          // Worker URL — replace with your actual deployed worker subdomain
+          const res = await fetch('https://jobfit-counter.https://tumelo-segale.workers.dev/');
           if (!res.ok) throw new Error();
           const data = await res.json();
-          const count = data?.data?.viewer?.accounts?.[0]?.total?.[0]?.count;
-          if (count != null) {
-            el.textContent = Number(count).toLocaleString();
+          if (data.count != null) {
+            el.textContent = Number(data.count).toLocaleString();
           } else {
-            el.textContent = '-';
+            el.textContent = '—';
           }
         } catch (_) {
-          el.textContent = '-';
+          el.textContent = '—';
         }
       }
       loadCounter();
