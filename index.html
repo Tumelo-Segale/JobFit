@@ -47,7 +47,7 @@
       <!-- CV counter -->
       <div class="cv-counter-row">
         <span class="cv-counter-label">CVs analysed globally</span>
-        <span class="cv-counter-value" id="cv-counter-value">—</span>
+        <span class="cv-counter-value" id="cv-counter-value">-</span>
         <button class="cv-counter-hint" id="cv-counter-hint-btn" aria-label="Privacy note about counter"
           aria-expanded="false">
           <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" viewBox="0 0 24 24"
@@ -67,7 +67,7 @@
               </svg>
               Zero personal data collected
             </div>
-            <p>This counter uses Cloudflare Web Analytics — an anonymous, privacy-respecting hit counter. It records
+            <p>This counter uses Cloudflare Web Analytics - an anonymous, privacy-respecting hit counter. It records
               <strong>only that a CV was submitted</strong>. No file contents, no resume text, no IP address, no
               cookies, and no personal identifiers are ever transmitted or stored.
             </p>
@@ -239,17 +239,17 @@
         const el = document.getElementById('cv-counter-value');
         if (!el) return;
         try {
-          // Worker URL — replace with your actual deployed worker subdomain
+          // Worker URL - replace with your actual deployed worker subdomain
           const res = await fetch('https://jobfit-counter.https://tumelo-segale.workers.dev/');
           if (!res.ok) throw new Error();
           const data = await res.json();
           if (data.count != null) {
             el.textContent = Number(data.count).toLocaleString();
           } else {
-            el.textContent = '—';
+            el.textContent = '-';
           }
         } catch (_) {
-          el.textContent = '—';
+          el.textContent = '-';
         }
       }
       loadCounter();
