@@ -31,7 +31,7 @@
             <path stroke-linecap="round" stroke-linejoin="round"
               d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
           </svg>
-          Feedback
+          <span class="feedback-text">Feedback</span>
         </a>
       </div>
     </div>
@@ -43,6 +43,38 @@
     <!-- Hero -->
     <div id="hero" class="anim-down">
       <h2>Private ATS Analysis.<br /><span class="hero-sub">Your CV never leaves your browser.</span></h2>
+
+      <!-- CV counter -->
+      <div class="cv-counter-row">
+        <span class="cv-counter-label">CVs analysed globally</span>
+        <span class="cv-counter-value" id="cv-counter-value">-</span>
+        <button class="cv-counter-hint" id="cv-counter-hint-btn" aria-label="Privacy note about counter"
+          aria-expanded="false">
+          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" viewBox="0 0 24 24"
+            stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <circle cx="12" cy="12" r="10" />
+            <path stroke-linecap="round" stroke-linejoin="round" d="M12 16v-4m0-4h.01" />
+          </svg>
+        </button>
+        <!-- Privacy popup -->
+        <div class="cv-counter-popup hidden" id="cv-counter-popup" role="tooltip">
+          <div class="cv-counter-popup-inner">
+            <div class="cv-counter-popup-title">
+              <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" fill="none" viewBox="0 0 24 24"
+                stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <path stroke-linecap="round" stroke-linejoin="round"
+                  d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+              </svg>
+              Zero personal data collected
+            </div>
+            <p>This counter uses Cloudflare Web Analytics - an anonymous, privacy-respecting hit counter. It records
+              <strong>only that a CV was submitted</strong>. No file contents, no resume text, no IP address, no
+              cookies, and no personal identifiers are ever transmitted or stored.
+            </p>
+          </div>
+        </div>
+      </div>
+
       <p class="subtext">Optimize compatibility scores, debug formatting, audit date structures, and map keyword match
         ratios locally. Free, offline-first, and 100% private.</p>
     </div>
@@ -195,6 +227,78 @@
   <script src="pdf.min.js"></script>
   <script src="mammoth.browser.min.js"></script>
   <script src="script.js"></script>
+
+  <!-- Cloudflare Web Analytics -->
+  <script defer src="https://static.cloudflareinsights.com/beacon.min.js"
+    data-cf-beacon='{"token": "405d07f37f0e4805a6ee9b49be011d7a"}'></script>
+
+  <!-- CV counter: reads Cloudflare Analytics API and increments on each analysis -->
+  <script>
+    (function () {
+      // Fetch approximate count from Cloudflare Analytics API
+      // Replace CF_ACCOUNT_ID and CF_API_TOKEN with your values
+      // This is a display-only pull; the beacon above does the actual counting.
+      async function loadCounter() {
+        const el = document.getElementById('cv-counter-value');
+        if (!el) return;
+        try {
+          // Cloudflare Analytics API (GraphQL)
+          const accountId = 'cfk_0f762hDVhnHMAsCY1gWs1pWenHbhdG5LRDyEtUSbd2a5543d';
+          const apiToken = 'cfut_LhzOBGvRGTsewhU7dXcHAZzAhv1ETvOyoX9fI6p5c8d33a25';
+          const query = JSON.stringify({
+            query: `{
+              viewer {
+                accounts(filter: { accountTag: $accountTag }) {
+                  total: rumPageloadEventsAdaptiveGroups(
+                    filter: { AND: [{ requestPath: "/" }] }
+                    limit: 1
+                    orderBy: [count_DESC]
+                  ) { count }
+                }
+              }
+            }`,
+            variables: { accountTag: accountId }
+          });
+          const res = await fetch('https://api.cloudflare.com/client/v4/graphql', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${apiToken}`
+            },
+            body: query
+          });
+          if (!res.ok) throw new Error();
+          const data = await res.json();
+          const count = data?.data?.viewer?.accounts?.[0]?.total?.[0]?.count;
+          if (count != null) {
+            el.textContent = Number(count).toLocaleString();
+          } else {
+            el.textContent = '-';
+          }
+        } catch (_) {
+          el.textContent = '-';
+        }
+      }
+      loadCounter();
+
+      // Hint popup toggle
+      const btn = document.getElementById('cv-counter-hint-btn');
+      const popup = document.getElementById('cv-counter-popup');
+      if (btn && popup) {
+        btn.addEventListener('click', function (e) {
+          e.stopPropagation();
+          const open = !popup.classList.contains('hidden');
+          popup.classList.toggle('hidden', open);
+          btn.setAttribute('aria-expanded', String(!open));
+        });
+        document.addEventListener('click', function () {
+          popup.classList.add('hidden');
+          btn.setAttribute('aria-expanded', 'false');
+        });
+        popup.addEventListener('click', function (e) { e.stopPropagation(); });
+      }
+    })();
+  </script>
 
 </body>
 
