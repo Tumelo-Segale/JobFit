@@ -2359,6 +2359,10 @@ footer {
   z-index: 200;
   width: 280px;
   animation: fadeUp 0.18s ease both;
+  /* Prevent underlying text from bleeding through on mobile */
+  background: var(--card2);
+  border-radius: 12px;
+  isolation: isolate;
 }
 
 .cv-counter-popup-inner {
