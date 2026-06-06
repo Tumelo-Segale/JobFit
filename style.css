@@ -2359,8 +2359,9 @@ footer {
   z-index: 200;
   width: 280px;
   animation: fadeUp 0.18s ease both;
-  /* Prevent underlying text from bleeding through on mobile */
-  background: var(--card2);
+  /* Ensure the wrapper itself is fully opaque so no underlying
+     content can bleed through, especially on mobile */
+  background: #1a1a1a !important;
   border-radius: 12px;
   isolation: isolate;
 }
@@ -2372,6 +2373,8 @@ footer {
   padding: 14px 16px;
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6);
   text-align: left;
+  position: relative;
+  z-index: 1;
 }
 
 .cv-counter-popup-title {
