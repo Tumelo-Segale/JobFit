@@ -2359,8 +2359,6 @@ footer {
   z-index: 200;
   width: 280px;
   animation: fadeUp 0.18s ease both;
-  /* Ensure the wrapper itself is fully opaque so no underlying
-     content can bleed through, especially on mobile */
   background: #1a1a1a !important;
   border-radius: 12px;
   isolation: isolate;
