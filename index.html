@@ -240,7 +240,7 @@
         if (!el) return;
         try {
           // Worker URL - replace with your actual deployed worker subdomain
-          const res = await fetch('https://jobfit-counter.https://tumelo-segale.workers.dev/');
+          const res = await fetch('https://jobfit-counter.tumelo-segale.workers.dev/');
           if (!res.ok) throw new Error();
           const data = await res.json();
           if (data.count != null) {
