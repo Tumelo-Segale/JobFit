@@ -28,7 +28,7 @@
    • System font fallback (no Google Fonts network dep)
    ═══════════════════════════════════════════════════════ */
 
-const APP_VERSION = "2.0.0";
+const APP_VERSION = "2.1.0";
 
 /* ── STATE ────────────────────────────────────────── */
 let state = {
@@ -51,6 +51,9 @@ let state = {
 const SESSION_KEY = "jobfit_session_v2";
 function saveSession() {
   try {
+    // Strip _rawText (already in state.cvText) before serialising to avoid
+    // writing the full CV text twice into sessionStorage on every interaction.
+    const { _rawText: _dropped, ...resultWithoutRaw } = state.result || {};
     const snap = {
       cvText: state.cvText,
       cvFileName: state.cvFileName,
@@ -61,7 +64,7 @@ function saveSession() {
       outreachChannel: state.outreachChannel,
       outreachEdits: state.outreachEdits,
       activeTab: state.activeTab,
-      result: state.result,
+      result: state.result ? resultWithoutRaw : null,
     };
     sessionStorage.setItem(SESSION_KEY, JSON.stringify(snap));
   } catch (_) {}
@@ -83,7 +86,12 @@ function clearSession() {
   } catch (_) {}
 }
 
-/* ── PORTER STEMMER (light) ───────────────────────── */
+/* ── DEBOUNCED SESSION SAVE ────────────────────────── */
+let _saveSessionTimer = null;
+function saveSessionDebounced() {
+  clearTimeout(_saveSessionTimer);
+  _saveSessionTimer = setTimeout(saveSession, 300);
+}
 // Reduces words to approximate stems so "engineer" matches "engineering", etc.
 function stem(word) {
   let w = word.toLowerCase().trim();
@@ -102,27 +110,23 @@ function stem(word) {
     const stem = w.slice(0, -2);
     if (stem.length > 2) w = stem;
   }
-  // Step 2
+  // Step 2 (deduplicated)
   const step2 = [
     ["ational", "ate"],
     ["tional", "tion"],
     ["enci", "ence"],
     ["anci", "ance"],
+    ["ization", "ize"],
+    ["isation", "ise"],
     ["izer", "ize"],
     ["iser", "ise"],
     ["alism", "al"],
+    ["aliti", "al"],
     ["ation", "ate"],
     ["ator", "ate"],
-    ["alism", "al"],
-    ["aliti", "al"],
     ["ousli", "ous"],
     ["entli", "ent"],
     ["eli", "e"],
-    ["ousli", "ous"],
-    ["ization", "ize"],
-    ["isation", "ise"],
-    ["ation", "ate"],
-    ["alism", "al"],
   ];
   for (const [suf, rep] of step2) {
     if (w.endsWith(suf) && w.length - suf.length > 1) {
@@ -140,7 +144,72 @@ function stem(word) {
   return w.length > 2 ? w : word.toLowerCase();
 }
 
-/* ── INDUSTRIES (weighted keywords) ──────────────── */
+/* ── SHARED STOP WORDS ────────────────────────────── */
+const STOP_WORDS = new Set([
+  // JD boilerplate
+  "with",
+  "this",
+  "that",
+  "they",
+  "from",
+  "your",
+  "their",
+  "work",
+  "have",
+  "about",
+  "ideal",
+  "candidate",
+  "responsibilities",
+  "requirements",
+  "must",
+  "should",
+  "will",
+  "highly",
+  "ability",
+  "looking",
+  "needed",
+  "role",
+  "position",
+  "other",
+  "including",
+  "years",
+  "using",
+  "working",
+  "able",
+  "also",
+  "make",
+  "well",
+  "good",
+  "great",
+  "strong",
+  "least",
+  "plus",
+  "nice",
+  "into",
+  "been",
+  "more",
+  "than",
+  "some",
+  "when",
+  "what",
+  "where",
+  "which",
+  // common CV filler
+  "experience",
+  "education",
+  "management",
+  "project",
+  "development",
+  "software",
+  "skills",
+  "systems",
+  "managed",
+  "team",
+  "company",
+  "business",
+  "including",
+  "spreadsheets",
+]);
 // Each keyword has a weight. Niche/specific terms weight more than generic ones.
 const INDUSTRIES = [
   {
@@ -450,13 +519,16 @@ function extractCandidateName(text) {
     .split("\n")
     .map((l) => l.trim())
     .filter(Boolean);
-  // First non-empty line that looks like a name (2-4 capitalised words, no numbers)
+  // First non-empty line ≤30 chars, 2–4 tokens, no digits, looks like a name
   for (const line of lines.slice(0, 5)) {
+    if (line.length > 50) continue; // skip long lines
     const words = line.split(/\s+/);
+    if (words.length < 2 || words.length > 4) continue;
+    if (/\d/.test(line)) continue; // skip lines with numbers
+    if (/@|http|\.com|:/.test(line)) continue; // skip contact lines
+    // Each word: starts with letter, may contain apostrophe/hyphen (O'Brien, van)
     if (
-      words.length >= 2 &&
-      words.length <= 4 &&
-      words.every((w) => /^[A-Z][a-z]+$/.test(w))
+      words.every((w) => /^[A-Za-zÀ-ÖØ-öø-ÿ][A-Za-zÀ-ÖØ-öø-ÿ''\-]*$/.test(w))
     ) {
       return line;
     }
@@ -754,12 +826,12 @@ function analyzeCV(
   const dateFormats = [
     {
       pattern:
-        /\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]* \d{4}\b/gi,
+        /\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]* \d{4}\b/i,
       label: "Mon YYYY",
     },
-    { pattern: /\b\d{2}\/\d{4}\b/g, label: "MM/YYYY" },
-    { pattern: /\b\d{4}\s*[-–]\s*\d{4}\b/g, label: "YYYY-YYYY" },
-    { pattern: /\b(19|20)\d{2}\b/g, label: "YYYY" },
+    { pattern: /\b\d{2}\/\d{4}\b/, label: "MM/YYYY" },
+    { pattern: /\b\d{4}\s*[-–]\s*\d{4}\b/, label: "YYYY-YYYY" },
+    { pattern: /\b(19|20)\d{2}\b/, label: "YYYY" },
   ];
   const foundFormats = dateFormats.filter((f) => f.pattern.test(lowerText));
   const mixedDates = foundFormats.length > 2;
@@ -968,30 +1040,12 @@ function analyzeCV(
 
   // Keyword stuffing - adaptive threshold based on doc length
   const threshold = stuffingThreshold(wordCount);
-  const stopTerms = new Set([
-    "experience",
-    "education",
-    "management",
-    "project",
-    "development",
-    "software",
-    "skills",
-    "including",
-    "systems",
-    "working",
-    "managed",
-    "responsibilities",
-    "position",
-    "company",
-    "business",
-    "team",
-  ]);
   const wordFreqMap = {};
   lowerText
     .replace(/[^a-z\s]/gi, "")
     .split(/\s+/)
     .forEach((w) => {
-      if (w.length > 4 && !stopTerms.has(w))
+      if (w.length > 4 && !STOP_WORDS.has(w))
         wordFreqMap[w] = (wordFreqMap[w] || 0) + 1;
     });
   let stuffedWord = "",
@@ -1067,62 +1121,13 @@ function analyzeCV(
     jdKwScore = 0;
   if (jobDescription && jobDescription.trim().length > 10) {
     const jdClean = jobDescription.toLowerCase().replace(/[^a-z0-9#+\s]/g, " ");
-    const stopWords = new Set([
-      "with",
-      "this",
-      "that",
-      "they",
-      "from",
-      "your",
-      "their",
-      "work",
-      "have",
-      "experience",
-      "skills",
-      "about",
-      "team",
-      "ideal",
-      "candidate",
-      "responsibilities",
-      "requirements",
-      "must",
-      "should",
-      "will",
-      "highly",
-      "ability",
-      "looking",
-      "needed",
-      "role",
-      "position",
-      "other",
-      "including",
-      "years",
-      "using",
-      "working",
-      "able",
-      "also",
-      "make",
-      "well",
-      "good",
-      "great",
-      "strong",
-      "least",
-      "plus",
-      "nice",
-      "into",
-      "been",
-      "more",
-      "than",
-      "some",
-      "when",
-      "what",
-      "where",
-      "which",
-    ]);
+    // Build stem → original token map so the UI shows readable words
     const wordFreq = {};
+    const stemToOriginal = {};
     jdClean.split(/\s+/).forEach((w) => {
-      if (w.length > 3 && !stopWords.has(w) && isNaN(Number(w))) {
+      if (w.length > 3 && !STOP_WORDS.has(w) && isNaN(Number(w))) {
         const s = stem(w);
+        if (!stemToOriginal[s]) stemToOriginal[s] = w; // keep first occurrence
         wordFreq[s] = (wordFreq[s] || 0) + 1;
       }
     });
@@ -1146,14 +1151,15 @@ function analyzeCV(
       missing = [],
       density = [];
     topKW.forEach((kw) => {
+      const displayWord = stemToOriginal[kw] || kw; // show original token
       const count = cvStemmed[kw] || 0;
       const pct =
         wordCount > 0 ? parseFloat(((count / wordCount) * 100).toFixed(2)) : 0;
       const status = count === 0 ? "low" : pct > 3 ? "stuffed" : "good";
       if (count > 0) {
-        matched.push({ word: kw, count });
-        density.push({ word: kw, count, density: pct, status });
-      } else missing.push(kw);
+        matched.push({ word: displayWord, count });
+        density.push({ word: displayWord, count, density: pct, status });
+      } else missing.push(displayWord);
     });
     const matchPct =
       topKW.length > 0 ? Math.round((matched.length / topKW.length) * 100) : 0;
@@ -1279,7 +1285,7 @@ function analyzeCV(
   const candidateName = extractCandidateName(text);
 
   return {
-    id: Math.random().toString(36).substr(2, 9),
+    id: Math.random().toString(36).substring(2, 11),
     timestamp: new Date().toISOString(),
     score: finalScore,
     scoreBreakdown,
@@ -1307,28 +1313,39 @@ function analyzeCV(
   };
 }
 
+/* ── HTML ESCAPE HELPER ───────────────────────────── */
+function escapeHtml(str) {
+  if (!str) return "";
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 /* ── SVG ICONS ────────────────────────────────────── */
 const Icons = {
-  check: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>`,
-  warn: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>`,
-  fail: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>`,
-  alert: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>`,
-  back: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M10 19l-7-7m0 0l7-7m-7 7h18"/></svg>`,
-  refresh: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>`,
-  book: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/></svg>`,
-  trophy: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z"/></svg>`,
-  copy: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>`,
-  square: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/></svg>`,
-  checksq: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 11l3 3L22 4m-4 8v6a2 2 0 01-2 2H6a2 2 0 01-2-2V6a2 2 0 012-2h8"/></svg>`,
-  building: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/></svg>`,
-  pencil: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>`,
-  shield: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>`,
-  scan: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>`,
-  download: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>`,
-  info: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path stroke-linecap="round" stroke-linejoin="round" d="M12 16v-4m0-4h.01"/></svg>`,
-  flag: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3 3v18m0-13s2-2 5-2 5 2 8 2 5-2 5-2V3s-2 2-5 2-5-2-8-2-5 2-5 2z"/></svg>`,
-  print: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 01-2-2v-5a2 2 0 012-2h16a2 2 0 012 2v5a2 2 0 01-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>`,
-  star: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>`,
+  check: `<svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>`,
+  warn: `<svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>`,
+  fail: `<svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>`,
+  alert: `<svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>`,
+  back: `<svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M10 19l-7-7m0 0l7-7m-7 7h18"/></svg>`,
+  refresh: `<svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>`,
+  book: `<svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/></svg>`,
+  trophy: `<svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z"/></svg>`,
+  copy: `<svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>`,
+  square: `<svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/></svg>`,
+  checksq: `<svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 11l3 3L22 4m-4 8v6a2 2 0 01-2 2H6a2 2 0 01-2-2V6a2 2 0 012-2h8"/></svg>`,
+  building: `<svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/></svg>`,
+  pencil: `<svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>`,
+  shield: `<svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>`,
+  scan: `<svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>`,
+  download: `<svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>`,
+  info: `<svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path stroke-linecap="round" stroke-linejoin="round" d="M12 16v-4m0-4h.01"/></svg>`,
+  flag: `<svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3 3v18m0-13s2-2 5-2 5 2 8 2 5-2 5-2V3s-2 2-5 2-5-2-8-2-5 2-5 2z"/></svg>`,
+  print: `<svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 01-2-2v-5a2 2 0 012-2h16a2 2 0 012 2v5a2 2 0 01-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>`,
+  star: `<svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>`,
 };
 
 function statusIcon(status) {
@@ -1370,7 +1387,8 @@ function buildRing(score) {
     ? "" // no transition - already at final position
     : "transition:stroke-dashoffset 1.2s cubic-bezier(.4,0,.2,1);";
   return `<div class="ring-wrap">
-<svg width="${size}" height="${size}" style="transform:rotate(-90deg);" aria-hidden="true">
+<svg width="${size}" height="${size}" style="transform:rotate(-90deg);"
+  role="img" aria-label="ATS Score: ${score} out of 100">
   <circle cx="${size / 2}" cy="${
     size / 2
   }" r="${r}" fill="transparent" stroke="${track}" stroke-width="${sw}"/>
@@ -1382,8 +1400,8 @@ function buildRing(score) {
     style="${transitionStyle}"
     data-offset="${offset}"/>
 </svg>
-<div class="ring-label-wrap" style="color:${col}" aria-live="polite">
-  <span class="ring-score-num" id="score-num" aria-label="ATS Score: ${score}">${
+<div class="ring-label-wrap" style="color:${col}" aria-hidden="true">
+  <span class="ring-score-num" id="score-num">${
     state.scoreAnimated ? score : 0
   }</span>
   <span class="ring-ats-label">ATS Score</span>
@@ -1647,7 +1665,9 @@ function renderDashboard(result) {
     return `
 <div class="dept-banner">
   ${Icons.building}
-  <span>Detected as <strong>${result.department}</strong> ${deptNote}</span>
+  <span>Detected as <strong>${escapeHtml(
+    result.department
+  )}</strong> ${deptNote}</span>
   ${
     result.deptConfidence < 40
       ? `<span class="dept-warning">Low confidence - CV may span multiple fields or department keywords are sparse.</span>`
@@ -1749,7 +1769,7 @@ function renderDashboard(result) {
   <div class="outreach-editable-hint">${
     Icons.pencil
   } Edit before copying - your changes are saved when you switch channels</div>
-  <div class="outreach-text" id="outreach-text" contenteditable="true" spellcheck="true" aria-label="Outreach template - click to edit">${activeText}</div>
+  <div class="outreach-text" id="outreach-text" contenteditable="true" spellcheck="true" aria-label="Outreach template - click to edit" aria-multiline="true">${activeText}</div>
   <button class="copy-btn" data-action="copy-outreach" aria-label="Copy template to clipboard">
     ${Icons.copy} <span id="copy-label">Copy Template</span>
   </button>
@@ -1797,12 +1817,14 @@ function renderDashboard(result) {
         ? result.issues
             .map(
               (i) => `
-<div class="issue-card ${i.severity}" role="listitem">
+<div class="issue-card ${escapeHtml(i.severity)}" role="listitem">
   ${i.severity === "error" ? Icons.fail : Icons.alert}
   <div>
-    <div class="issue-title">${i.title}</div>
-    <div class="issue-desc">${i.description}</div>
-    <div class="issue-fix"><strong>Fix:</strong> ${i.fixMessage}</div>
+    <div class="issue-title">${escapeHtml(i.title)}</div>
+    <div class="issue-desc">${escapeHtml(i.description)}</div>
+    <div class="issue-fix"><strong>Fix:</strong> ${escapeHtml(
+      i.fixMessage
+    )}</div>
   </div>
 </div>`
             )
@@ -1894,19 +1916,25 @@ ${
 }`;
   }
 
-  const panelMap = {
-    overview: tabOverview(),
-    boost: tabBoost(),
-    formatting: tabFormatting(),
-    issues: tabIssues(),
-    keywords: tabKeywords(),
+  const panelBuilders = {
+    overview: tabOverview,
+    boost: tabBoost,
+    formatting: tabFormatting,
+    issues: tabIssues,
+    keywords: tabKeywords,
   };
   const issueCount = result.issues.length;
   const issueLabel =
-    issueCount === 0 ? "All Clear" : `Warnings (${issueCount})`;
-  const kwLabel = result.keywords
+    issueCount === 0 ? "All Clear ✓" : `Warnings (${issueCount})`;
+  const hasKw = !!result.keywords;
+  const kwLabel = hasKw
     ? `Keywords (${result.keywords.matchPercentage}%)`
-    : "Keywords";
+    : null; // null = hide tab
+
+  // If keywords tab was active but JD was removed, fall back to overview
+  const activeTab =
+    !hasKw && state.activeTab === "keywords" ? "overview" : state.activeTab;
+  if (activeTab !== state.activeTab) state.activeTab = activeTab;
 
   const dash = document.getElementById("dashboard-section");
   dash.innerHTML = `
@@ -1918,19 +1946,24 @@ ${
     <div>
       <div class="dash-title">ATS Diagnostic Report</div>
       <div class="dash-meta">
-        <strong>${result.fileName}</strong>
+        <strong>${escapeHtml(result.fileName)}</strong>
         <span class="dot" aria-hidden="true">•</span>
-        <span class="dash-dept">${Icons.building} <strong>${
+        <span class="dash-dept">${Icons.building} <strong>${escapeHtml(
     result.department
-  }</strong></span>
+  )}</strong></span>
         <span class="dot" aria-hidden="true">•</span>
         <span class="version-badge">v${APP_VERSION}</span>
       </div>
     </div>
   </div>
-  <button class="new-cv-btn" data-action="reset" aria-label="Analyze a new CV">${
-    Icons.refresh
-  } New Analysis</button>
+  <div class="dash-header-actions">
+    <button class="rerun-btn" data-action="rerun" title="Re-analyse with current CV and JD" aria-label="Re-run analysis">${
+      Icons.scan
+    } Re-run</button>
+    <button class="new-cv-btn" data-action="reset" aria-label="Analyze a new CV">${
+      Icons.refresh
+    } New Analysis</button>
+  </div>
 </div>
 
 <div class="dash-grid">
@@ -1982,14 +2015,20 @@ ${
       }" data-action="switch-tab" data-tab="issues" role="tab" aria-selected="${
     state.activeTab === "issues"
   }" tabindex="${state.activeTab === "issues" ? 0 : -1}">${issueLabel}</button>
-      <button class="tab-btn${
-        state.activeTab === "keywords" ? " active" : ""
-      }" data-action="switch-tab" data-tab="keywords" role="tab" aria-selected="${
-    state.activeTab === "keywords"
-  }" tabindex="${state.activeTab === "keywords" ? 0 : -1}">${kwLabel}</button>
+      ${
+        kwLabel
+          ? `<button class="tab-btn${
+              state.activeTab === "keywords" ? " active" : ""
+            }" data-action="switch-tab" data-tab="keywords" role="tab" aria-selected="${
+              state.activeTab === "keywords"
+            }" tabindex="${
+              state.activeTab === "keywords" ? 0 : -1
+            }">${kwLabel}</button>`
+          : ""
+      }
     </div>
-    <div class="tab-panel" id="tab-panel" role="tabpanel" aria-live="polite">
-      ${panelMap[state.activeTab]}
+    <div class="tab-panel" id="tab-panel" role="tabpanel" aria-live="off" tabindex="-1">
+      ${(panelBuilders[state.activeTab] || panelBuilders.overview)()}
     </div>
   </div>
 </div>`;
@@ -2024,11 +2063,37 @@ document.addEventListener("click", function (e) {
 
   if (action === "reset") {
     resetDashboard();
+  } else if (action === "rerun") {
+    if (!state.cvText.trim()) return;
+    state.scoreAnimated = false;
+    const result = analyzeCV(
+      state.cvText,
+      state.cvFileName || "Pasted_CV.txt",
+      state.cvFileSize || state.cvText.length,
+      state.cvFileType || "txt",
+      state.jobDescription
+    );
+    showDashboard(result);
   } else if (action === "switch-tab") {
     saveOutreachEdit();
     state.activeTab = t.dataset.tab;
     renderDashboard(state.result);
     saveSession();
+    // Move focus into the new panel so screen readers announce the heading
+    requestAnimationFrame(() => {
+      const panel = document.getElementById("tab-panel");
+      if (panel) {
+        const heading = panel.querySelector(
+          "h4, h3, h2, [class*='panel-heading']"
+        );
+        if (heading) {
+          heading.setAttribute("tabindex", "-1");
+          heading.focus({ preventScroll: true });
+        } else {
+          panel.focus({ preventScroll: true });
+        }
+      }
+    });
   } else if (action === "set-channel") {
     saveOutreachEdit();
     state.outreachChannel = t.dataset.channel;
@@ -2046,9 +2111,15 @@ document.addEventListener("click", function (e) {
     const label = document.getElementById("copy-label");
     if (!el || !label) return;
     const text = el.innerText || "";
-    (navigator.clipboard?.writeText(text) || Promise.reject())
-      .catch(() => fallbackCopy(text))
-      .then?.(() => flashLabel(label)) || flashLabel(label);
+    const writePromise = navigator.clipboard?.writeText(text);
+    if (writePromise) {
+      writePromise
+        .catch(() => fallbackCopy(text))
+        .finally(() => flashLabel(label));
+    } else {
+      fallbackCopy(text);
+      flashLabel(label);
+    }
   } else if (action === "toggle-breakdown") {
     const bp = document.getElementById("score-breakdown");
     if (!bp) return;
@@ -2146,17 +2217,19 @@ function resetDashboard() {
   document.getElementById("upload-section").classList.remove("hidden");
   document.getElementById("hero").classList.remove("hidden");
   document.getElementById("explainer-block").classList.remove("hidden");
+  // Re-attach listeners that DOMContentLoaded may have skipped on session restore
+  attachUploadListeners();
 }
 
 /* ── MODE TOGGLE ──────────────────────────────────── */
 function setMode(mode) {
   state.inputMode = mode;
-  document
-    .getElementById("mode-upload")
-    .classList.toggle("active", mode === "upload");
-  document
-    .getElementById("mode-text")
-    .classList.toggle("active", mode === "text");
+  const uploadBtn = document.getElementById("mode-upload");
+  const textBtn = document.getElementById("mode-text");
+  uploadBtn.classList.toggle("active", mode === "upload");
+  textBtn.classList.toggle("active", mode === "text");
+  uploadBtn.setAttribute("aria-checked", String(mode === "upload"));
+  textBtn.setAttribute("aria-checked", String(mode === "text"));
   document
     .getElementById("dropzone-wrap")
     .classList.toggle("hidden", mode !== "upload");
@@ -2296,27 +2369,10 @@ async function processFile(file) {
 }
 
 /* ── EVENT LISTENERS ──────────────────────────────── */
-document.addEventListener("DOMContentLoaded", function () {
-  // Restore session if available
-  if (loadSession() && state.result) {
-    showDashboard(state.result);
-    // Restore form fields
-    if (state.cvText && state.inputMode === "text") {
-      setMode("text");
-      document.getElementById("cv-textarea").value = state.cvText;
-      document.getElementById("cv-chars").textContent =
-        "Characters: " + state.cvText.length;
-      document.getElementById("cv-words").textContent =
-        "Words: " + state.cvText.split(/\s+/).filter(Boolean).length;
-    }
-    if (state.jobDescription) {
-      document.getElementById("jd-textarea").value = state.jobDescription;
-      document.getElementById("jd-chars").textContent =
-        "Characters: " + state.jobDescription.length;
-      document.getElementById("jd-clear").classList.remove("hidden");
-    }
-    return;
-  }
+let _uploadListenersAttached = false;
+function attachUploadListeners() {
+  if (_uploadListenersAttached) return;
+  _uploadListenersAttached = true;
 
   // Mode toggles
   document
@@ -2353,6 +2409,8 @@ document.addEventListener("DOMContentLoaded", function () {
   dz.addEventListener("drop", (e) => {
     if (e.dataTransfer.files?.[0]) processFile(e.dataTransfer.files[0]);
   });
+  // Clear stuck drag-over if cursor leaves browser window
+  document.addEventListener("dragend", () => dz.classList.remove("drag-over"));
 
   // CV textarea
   document.getElementById("cv-textarea").addEventListener("input", (e) => {
@@ -2362,7 +2420,7 @@ document.addEventListener("DOMContentLoaded", function () {
     document.getElementById("cv-words").textContent =
       "Words: " + state.cvText.split(/\s+/).filter(Boolean).length;
     updateAnalyzeBtn();
-    saveSession();
+    saveSessionDebounced();
   });
 
   // JD textarea
@@ -2373,7 +2431,7 @@ document.addEventListener("DOMContentLoaded", function () {
     document
       .getElementById("jd-clear")
       .classList.toggle("hidden", !state.jobDescription);
-    saveSession();
+    saveSessionDebounced();
   });
 
   // JD clear
@@ -2396,6 +2454,7 @@ document.addEventListener("DOMContentLoaded", function () {
     btn.className = "cta-btn disabled";
     btn.disabled = true;
     state.isLoading = true;
+    // Use setTimeout(0) to allow the spinner to paint before the sync analysis runs
     setTimeout(() => {
       try {
         const result = analyzeCV(
@@ -2406,20 +2465,23 @@ document.addEventListener("DOMContentLoaded", function () {
           state.jobDescription
         );
         showDashboard(result);
-        // Ping the counter Worker — increments the KV count for each successful analysis
-        fetch("https://jobfit-counter.tumelo-segale.workers.dev/ping", {
-          method: "POST",
-        })
-          .then(() =>
-            fetch("https://jobfit-counter.tumelo-segale.workers.dev/")
-          )
-          .then((r) => r.json())
-          .then((data) => {
-            const el = document.getElementById("cv-counter-value");
-            if (el && data.count != null)
-              el.textContent = Number(data.count).toLocaleString();
+        // Ping counter once per page session
+        if (!attachUploadListeners._pinged) {
+          attachUploadListeners._pinged = true;
+          fetch("https://jobfit-counter.tumelo-segale.workers.dev/ping", {
+            method: "POST",
           })
-          .catch(() => {});
+            .then(() =>
+              fetch("https://jobfit-counter.tumelo-segale.workers.dev/")
+            )
+            .then((r) => r.json())
+            .then((data) => {
+              const el = document.getElementById("cv-counter-value");
+              if (el && data.count != null)
+                el.textContent = Number(data.count).toLocaleString();
+            })
+            .catch(() => {});
+        }
       } catch (err) {
         console.error(err);
         showFeedback("error", "Analysis failed. Please try again.");
@@ -2428,6 +2490,33 @@ document.addEventListener("DOMContentLoaded", function () {
         btn.innerHTML = `${Icons.scan} Perform ATS Check`;
         updateAnalyzeBtn();
       }
-    }, 800);
+    }, 0);
   });
+}
+
+document.addEventListener("DOMContentLoaded", function () {
+  // Restore session if available
+  if (loadSession() && state.result) {
+    showDashboard(state.result);
+    // Restore form fields (upload section is hidden but keep state consistent)
+    if (state.cvText && state.inputMode === "text") {
+      setMode("text");
+      document.getElementById("cv-textarea").value = state.cvText;
+      document.getElementById("cv-chars").textContent =
+        "Characters: " + state.cvText.length;
+      document.getElementById("cv-words").textContent =
+        "Words: " + state.cvText.split(/\s+/).filter(Boolean).length;
+    }
+    if (state.jobDescription) {
+      document.getElementById("jd-textarea").value = state.jobDescription;
+      document.getElementById("jd-chars").textContent =
+        "Characters: " + state.jobDescription.length;
+      document.getElementById("jd-clear").classList.remove("hidden");
+    }
+    // Still attach upload listeners so "New Analysis" returns to a working form
+    attachUploadListeners();
+    return;
+  }
+
+  attachUploadListeners();
 });

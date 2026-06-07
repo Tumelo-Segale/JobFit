@@ -15,7 +15,7 @@
   --dim: #a3a3a3;
   --dimmer: #525252;
   --font: "Outfit", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
-    Helvetica, Arial, sans-serif;
+    Helvetica, Arial, sans-serif; /* "Outfit" is optional — used only if installed locally; no CDN call */
   --mono: "JetBrains Mono", "Fira Code", "Cascadia Code", ui-monospace,
     "SF Mono", Consolas, "Liberation Mono", monospace;
 }
@@ -2721,124 +2721,16 @@ footer {
   }
 }
 
-/* ═══════════════════════════════════════════════════════
-   ICON SIZE FIXES - all inline SVG contexts
-   ═══════════════════════════════════════════════════════
-
-   Root cause: Icons in the Icons{} object have no width/height
-   attributes, so they inherit browser default sizing (~300px)
-   unless explicitly constrained by CSS. Every context that
-   injects an icon inline needs a targeted rule here.
-   ═══════════════════════════════════════════════════════ */
-
-/* ── CTA / Analyze button ────────────────────────── */
-.cta-btn svg,
-.cta-btn .spinner ~ svg {
-  width: 16px;
-  height: 16px;
+/* ── Base icon sizing ─────────────────────────────── */
+/* Icons in the Icons{} object carry width/height="1em", so they
+   inherit font-size from their context. This single rule is all
+   that's needed for sizing — the large per-context block below is
+   no longer required. */
+svg {
   flex-shrink: 0;
 }
 
-/* ── Dashboard header buttons ────────────────────── */
-/* dash-back-btn and new-cv-btn already have rules;
-   this catches any other header-area button icons */
-.dash-header svg {
-  width: 15px;
-  height: 15px;
-  flex-shrink: 0;
-}
-/* Override back specifically to keep its 16px */
-.dash-back-btn svg {
-  width: 16px;
-  height: 16px;
-}
-/* dash-dept building icon */
-.dash-dept svg {
-  width: 13px;
-  height: 13px;
-  flex-shrink: 0;
-  vertical-align: -2px;
-}
-
-/* ── Score card ──────────────────────────────────── */
-/* "How is this calculated?" button icon */
-.score-explain-btn svg {
-  width: 13px;
-  height: 13px;
-  flex-shrink: 0;
-}
-
-/* ── Overview tab ────────────────────────────────── */
-/* dept-banner building icon - already set but ensure */
-.dept-banner > svg {
-  width: 14px;
-  height: 14px;
-  flex-shrink: 0;
-  margin-top: 2px;
-}
-/* privacy box shield icon */
-.privacy-icon svg {
-  width: 15px;
-  height: 15px;
-}
-
-/* ── Playbook tab ────────────────────────────────── */
-/* "Hiring Playbook" title trophy icon */
-.playbook-title svg {
-  width: 16px;
-  height: 16px;
-  flex-shrink: 0;
-  vertical-align: -2px;
-}
-/* task checkbox icons */
-.task-cb svg {
-  width: 18px;
-  height: 18px;
-  flex-shrink: 0;
-}
-/* outreach section book icon */
-.outreach-head svg {
-  width: 14px;
-  height: 14px;
-  flex-shrink: 0;
-  vertical-align: -1px;
-}
-/* outreach editable pencil hint */
-.outreach-editable-hint svg {
-  width: 11px;
-  height: 11px;
-  flex-shrink: 0;
-}
-/* copy button */
-.copy-btn svg {
-  width: 14px;
-  height: 14px;
-  flex-shrink: 0;
-}
-
-/* ── Pattern rules tab ───────────────────────────── */
-/* check-icon-wrap already has rules; ensure both icon types */
-.check-icon-wrap svg {
-  width: 16px;
-  height: 16px;
-}
-
-/* ── Warnings tab ────────────────────────────────── */
-/* issue card icons */
-.issue-card > svg {
-  width: 17px;
-  height: 17px;
-  flex-shrink: 0;
-  margin-top: 1px;
-}
-/* "All Clear" zero-issues state */
-.no-issues > svg {
-  width: 30px;
-  height: 30px;
-}
-
-/* ── Keywords tab ────────────────────────────────── */
-/* Empty state scan icon - large decorative icon */
+/* Specific overrides only where the inherited size would be wrong */
 .tab-panel .empty-state svg {
   width: 40px;
   height: 40px;
@@ -2846,45 +2738,41 @@ footer {
   margin: 0 auto 12px;
   opacity: 0.3;
 }
-
-/* ── Score breakdown panel ───────────────────────── */
-.breakdown-title svg {
-  width: 13px;
-  height: 13px;
-  flex-shrink: 0;
-}
-.breakdown-disclaimer-label svg {
-  width: 11px;
-  height: 11px;
-  flex-shrink: 0;
-  color: var(--orange);
+.ring-wrap svg {
+  /* Score ring SVG has explicit width/height attributes — don't override */
+  width: unset;
+  height: unset;
 }
 
-/* ── Explainer section ───────────────────────────── */
-.explainer-heading svg {
-  width: 15px;
-  height: 15px;
-  flex-shrink: 0;
+/* ── Re-run button ────────────────────────────────── */
+.dash-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
 }
-
-/* ── Global catch-all for any icon inside a button ─
-   Prevents any future unsized icon from blowing up.
-   Specific rules above take precedence via specificity. */
-button svg {
-  max-width: 20px;
-  max-height: 20px;
-  flex-shrink: 0;
+.rerun-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--dim);
+  font-weight: 700;
+  font-size: 12px;
+  font-family: var(--font);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  transition: all 0.15s;
 }
-
-/* ── Inline icon vertical alignment ─────────────── */
-/* Icons used mid-sentence in headings/labels */
-.outreach-head svg,
-.playbook-title svg,
-.breakdown-title svg,
-.dept-banner svg,
-.dash-dept svg {
-  display: inline-block;
-  vertical-align: middle;
-  position: relative;
-  top: -1px;
+.rerun-btn:hover {
+  color: var(--white);
+  border-color: var(--border2);
+}
+@media (max-width: 600px) {
+  .rerun-btn {
+    flex: 1;
+    justify-content: center;
+  }
 }
