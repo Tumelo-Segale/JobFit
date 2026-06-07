@@ -15,7 +15,7 @@
   --dim: #a3a3a3;
   --dimmer: #525252;
   --font: "Outfit", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
-    Helvetica, Arial, sans-serif; /* "Outfit" is optional — used only if installed locally; no CDN call */
+    Helvetica, Arial, sans-serif; /* "Outfit" is optional - used only if installed locally; no CDN call */
   --mono: "JetBrains Mono", "Fira Code", "Cascadia Code", ui-monospace,
     "SF Mono", Consolas, "Liberation Mono", monospace;
 }
@@ -2724,7 +2724,7 @@ footer {
 /* ── Base icon sizing ─────────────────────────────── */
 /* Icons in the Icons{} object carry width/height="1em", so they
    inherit font-size from their context. This single rule is all
-   that's needed for sizing — the large per-context block below is
+   that's needed for sizing - the large per-context block below is
    no longer required. */
 svg {
   flex-shrink: 0;
@@ -2739,7 +2739,7 @@ svg {
   opacity: 0.3;
 }
 .ring-wrap svg {
-  /* Score ring SVG has explicit width/height attributes — don't override */
+  /* Score ring SVG has explicit width/height attributes - don't override */
   width: unset;
   height: unset;
 }

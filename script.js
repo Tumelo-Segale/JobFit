@@ -588,10 +588,10 @@ function analyzeCV(
   let nameStatus = "pass",
     nameDesc =
       "File named professionally - easy for ATS to associate with you.";
+  const reasons = [];
   if (hasSpaces || hasSpecialChars || isGeneric) {
     nameStatus = "warning";
     fnScore -= 20;
-    const reasons = [];
     if (hasSpaces) reasons.push("contains spaces");
     if (hasSpecialChars) reasons.push("has special symbols");
     if (isGeneric) reasons.push("uses a generic name like 'CV' or 'Resume'");
@@ -620,7 +620,16 @@ function analyzeCV(
   fileQualityCategories.push({
     id: "filename",
     title: "Professional Filename",
-    description: nameDesc,
+    description:
+      nameStatus === "pass"
+        ? `"${escapeHtml(
+            fileName
+          )}" - professionally named and easy for ATS to associate with your application.`
+        : `"${escapeHtml(fileName)}" - ${reasons.join(
+            ", "
+          )}. Rename to FirstName_LastName_CV.${
+            extension || "pdf"
+          } for best results.`,
     status: nameStatus,
     impact: "medium",
   });
@@ -635,10 +644,10 @@ function analyzeCV(
     title: "ATS-Friendly Format",
     description:
       typeStatus === "pass"
-        ? `Using recommended .${extension} format.`
+        ? `.${extension} is one of the two formats with the broadest ATS compatibility.`
         : typeStatus === "warning"
-        ? ".txt files lose all formatting metadata."
-        : "Unrecognised format. Use .pdf or .docx.",
+        ? ".txt files lose all formatting metadata - headings, bold text, and layout signals are stripped."
+        : `".${extension}" is not a recognised CV format. Use .pdf (preferred) or .docx.`,
     status: typeStatus,
     impact: "high",
   });
@@ -647,8 +656,12 @@ function analyzeCV(
     id: "filesize",
     title: "File Size",
     description: isTooLarge
-      ? "File exceeds 5MB. Some portals reject large uploads."
-      : "File size is optimal.",
+      ? `File is ${formatBytes(
+          fileSizeInBytes
+        )} - exceeds the 5 MB limit. Likely caused by embedded images or fonts. Some portals will silently reject this upload.`
+      : `File is ${formatBytes(
+          fileSizeInBytes
+        )} - well within the acceptable range for all major ATS portals.`,
     status: isTooLarge ? "warning" : "pass",
     impact: "low",
   });
@@ -671,8 +684,8 @@ function analyzeCV(
     id: "columns",
     title: "Single vs Multi-column",
     description: supportsColumns
-      ? "Potential multi-column structure detected - can confuse parsers."
-      : "Single-column orientation: good.",
+      ? `Multi-column layout detected (${columnIndicatorCount} column-aligned lines found) - ATS parsers read left-to-right linearly and will merge your columns into garbled text.`
+      : "Single-column layout confirmed - optimal for ATS linear parsing.",
     status: supportsColumns ? "warning" : "pass",
     impact: "high",
   });
@@ -706,8 +719,12 @@ function analyzeCV(
     id: "tables",
     title: "Table / Grid Structures",
     description: hasTables
-      ? "Dense grid blocks found - ATS may read cells out of order."
-      : "No problematic table structures.",
+      ? `Dense grid structures detected (${
+          pipeCount > 8
+            ? pipeCount + " pipe characters"
+            : tabularLines + " tabular lines"
+        }) - ATS engines often read table cells in unpredictable order, mixing job titles with dates.`
+      : "No problematic table or grid structures detected.",
     status: hasTables ? "warning" : "pass",
     impact: "high",
   });
@@ -730,8 +747,8 @@ function analyzeCV(
     title: "Text Box Containers",
     description:
       textObjectSignals >= 3
-        ? "Possible text frames detected - text inside boxes is invisible to many parsers."
-        : "No text box indicators found.",
+        ? `${textObjectSignals} text frame indicators found - content inside floating text boxes is completely invisible to most ATS parsers.`
+        : "No floating text box indicators found - content is in the main document flow.",
     status: textObjectSignals >= 3 ? "warning" : "pass",
     impact: "medium",
   });
@@ -746,8 +763,8 @@ function analyzeCV(
     id: "graphics",
     title: "Visual / Graphic Elements",
     description: hasGraphicsHints
-      ? "Skill rating bars or visual icons detected - invisible to ATS."
-      : "No visual decorations detected.",
+      ? "Skill rating bars, icons, or image elements detected - these are stripped entirely by ATS parsers, meaning your visual skill ratings contribute zero parseable content."
+      : "No visual decorations or graphic elements detected - all content is text-readable.",
     status: hasGraphicsHints ? "warning" : "pass",
     impact: "medium",
   });
@@ -817,7 +834,18 @@ function analyzeCV(
   readabilityCategories.push({
     id: "headings",
     title: "Standard Section Headings",
-    description: hdDesc,
+    description:
+      hdStatus === "pass"
+        ? `Both "Experience" and "Education" headings detected - ATS can correctly map your career history.`
+        : hdStatus === "warning"
+        ? `Non-standard section title "${escapeHtml(
+            weakHeaders[0]
+          )}" detected - may not be recognised by ATS parsing engines.`
+        : `Missing standard section heading${
+            !hasExpHeader && !hasEduHeader ? "s" : ""
+          }: ${!hasExpHeader ? '"Experience"' : ""}${
+            !hasExpHeader && !hasEduHeader ? " and " : ""
+          }${!hasEduHeader ? '"Education"' : ""}.`,
     status: hdStatus,
     impact: "high",
   });
@@ -840,10 +868,12 @@ function analyzeCV(
     id: "dates",
     title: "Consistent Date Formatting",
     description: mixedDates
-      ? "Multiple date format styles detected - pick one and be consistent."
+      ? `${foundFormats.length} different date styles detected (${foundFormats
+          .map((f) => f.label)
+          .join(", ")}) - inconsistent formatting confuses timeline parsers.`
       : noDates
-      ? "No date patterns found - ATS cannot verify employment timeline."
-      : `Consistent dates found (${foundFormats[0]?.label} format).`,
+      ? "No date patterns detected - ATS cannot calculate your employment tenure or verify your timeline."
+      : `Consistent date format (${foundFormats[0]?.label}) used throughout.`,
     status: mixedDates ? "warning" : noDates ? "warning" : "pass",
     impact: "medium",
   });
@@ -870,8 +900,12 @@ function analyzeCV(
     title: "Bullet Point Density",
     description:
       bulletCount > 3
-        ? `${bulletCount} bullet points found - good for keyword extraction.`
-        : "Very few bullets. Dense paragraphs reduce keyword visibility.",
+        ? `${bulletCount} bullet points found - strong keyword extraction surface.`
+        : bulletCount === 0
+        ? "No bullet points detected. Entire CV is written in prose - ATS keyword extraction will be poor."
+        : `Only ${bulletCount} bullet point${
+            bulletCount === 1 ? "" : "s"
+          } found. Dense paragraphs reduce keyword visibility.`,
     status: bulletCount > 3 ? "pass" : "warning",
     impact: "medium",
   });
@@ -943,11 +977,13 @@ function analyzeCV(
     description:
       missingContacts.length === 0
         ? linkedinValid
-          ? "Email, Phone, and valid LinkedIn URL found."
+          ? "Email, phone, and valid LinkedIn URL all detected in the header."
           : linkedinUrl
-          ? "Email and Phone found. Check LinkedIn URL format."
-          : "Email and Phone found - no LinkedIn URL."
-        : `Missing: ${missingContacts.join(", ")}.`,
+          ? "Email and phone found. LinkedIn URL present but format may be non-standard - verify it links correctly."
+          : "Email and phone found. Consider adding a LinkedIn URL to improve recruiter reach."
+        : `Missing contact fields: ${missingContacts.join(
+            ", "
+          )}. Recruiters cannot follow up without these details.`,
     status: contactStatus,
     impact: "high",
   });
@@ -963,8 +999,10 @@ function analyzeCV(
     id: "summary",
     title: "Professional Summary",
     description: hasSummary
-      ? "A dedicated profile/summary section found."
-      : "No summary section detected.",
+      ? "A dedicated summary or profile section found - good first impression for recruiters."
+      : wordCount < 200
+      ? `CV is very short (${wordCount} words). A professional summary would significantly improve both ATS scoring and recruiter engagement.`
+      : "No summary or profile section detected. Add a 3–4 sentence opener summarising your key experience and value.",
     status: hasSummary ? "pass" : "warning",
     impact: "high",
   });
@@ -990,10 +1028,21 @@ function analyzeCV(
     id: "metrics",
     title: "Quantified Achievements",
     description: hasMetrics
-      ? `${metricsCount} quantified impacts found (numbers + outcomes).`
+      ? `${metricsCount} quantified outcome${
+          metricsCount === 1 ? "" : "s"
+        } found (${
+          impactPhrases > 0
+            ? impactPhrases +
+              " impact verb" +
+              (impactPhrases !== 1 ? "s" : "") +
+              " + "
+            : ""
+        }numbers, percentages, or team sizes).`
       : hasImpactVerbs
-      ? "Impact verbs present but very few concrete numbers or percentages."
-      : "No quantified achievements detected.",
+      ? `${impactPhrases} impact verb${
+          impactPhrases === 1 ? "" : "s"
+        } found but no concrete numbers - add percentages, budget figures, or team sizes.`
+      : "No quantified achievements or impact verbs detected - recruiters cannot gauge your impact.",
     status: hasMetrics ? "pass" : "warning",
     impact: "medium",
   });
@@ -1016,10 +1065,14 @@ function analyzeCV(
     );
   contentCategories.push({
     id: "certifications",
-    title: "Certifications",
+    title: "Certifications & Credentials",
     description: hasCerts
-      ? "Certification signals found."
-      : "No certifications found (optional for some roles).",
+      ? `Certification or credential signals found - these strengthen your profile for roles requiring verified qualifications.`
+      : `No certifications detected. ${
+          detectedDept && detectedDept !== "General Career Path"
+            ? `For ${detectedDept} roles, relevant certifications can be a key differentiator.`
+            : "For many roles, certifications can improve your ranking."
+        }`,
     status: hasCerts ? "pass" : "warning",
     impact: "low",
   });
@@ -1032,8 +1085,16 @@ function analyzeCV(
     id: "projects",
     title: "Projects / Portfolio",
     description: hasProjects
-      ? "Projects section found."
-      : "No projects section (optional).",
+      ? `Projects or portfolio section detected - this strengthens your application${
+          detectedDept === "Software Development & IT"
+            ? " and is particularly valuable for technical roles"
+            : ""
+        }.`
+      : `No projects section found. ${
+          detectedDept === "Software Development & IT"
+            ? "For tech roles, a projects section or GitHub link is highly expected."
+            : "A portfolio or case studies section can significantly differentiate you."
+        }`,
     status: hasProjects ? "pass" : "warning",
     impact: "low",
   });
@@ -1463,117 +1524,142 @@ function getOutreachText(dept, channel, result) {
 }
 
 /* ── DYNAMIC TASKS ────────────────────────────────── */
-// Only show tasks that are relevant to what the analysis actually found.
-const ALL_TASKS = [
-  {
-    id: "single-col",
-    flag: "multiColumn",
-    label: "Convert to single-column layout",
-    impact: "High - ATS Reading",
-    desc: "Multi-column layouts cause text to merge horizontally during parsing.",
-  },
-  {
-    id: "add-metrics",
-    flag: "noMetrics",
-    label: "Add at least 3 quantified achievements (%, R, numbers)",
-    impact: "High - Content Score",
-    desc: "ATS and recruiters look for concrete impact numbers.",
-  },
-  {
-    id: "fix-file-name",
-    flag: "badFileName",
-    label: "Rename file: FirstName_LastName_Resume.pdf",
-    impact: "Medium - File Registry",
-    desc: "Remove spaces and special characters from your filename.",
-  },
-  {
-    id: "fix-headers",
-    flag: "missingHeaders",
-    label: "Add standard section headers (Experience, Education)",
-    impact: "High - Readability",
-    desc: "ATS maps your career from these exact header labels.",
-  },
-  {
-    id: "weak-headers",
-    flag: "weakHeaders",
-    label: "Replace creative section names with standard labels",
-    impact: "High - Readability",
-    desc: "Non-standard headers like 'My Journey' are not recognised.",
-  },
-  {
-    id: "add-bullets",
-    flag: "fewBullets",
-    label: "Rewrite achievements as bullet points with action verbs",
-    impact: "High - Keyword Extraction",
-    desc: "Bullets help parsers extract your role keywords.",
-  },
-  {
-    id: "fix-contact",
-    flag: "missingContact",
-    label: "Add missing contact info at top of CV",
-    impact: "Critical - Recruiter Access",
-    desc: "Recruiters need email, phone, and LinkedIn to reach you.",
-  },
-  {
-    id: "fix-linkedin",
-    flag: "badLinkedIn",
-    label: "Fix LinkedIn URL format (linkedin.com/in/yourname)",
-    impact: "Medium - Contact Quality",
-    desc: "Malformed LinkedIn URLs prevent profile verification.",
-  },
-  {
-    id: "add-summary",
-    flag: "noSummary",
-    label: "Write a 3–4 sentence professional summary",
-    impact: "Medium - First Impression",
-    desc: "Many ATS systems extract the summary as the candidate profile.",
-  },
-  {
-    id: "fix-dates",
-    flag: "mixedDates",
-    label: "Standardise all dates to one format (MM/YYYY)",
-    impact: "Medium - Timeline Parsing",
-    desc: "Mixed formats confuse tenure calculation algorithms.",
-  },
-  {
-    id: "reduce-stuffing",
-    flag: "stuffedKeyword",
-    label: "Reduce repetition of overused keyword",
-    impact: "Medium - Quality Score",
-    desc: "Adaptive threshold exceeded - substitute synonyms.",
-  },
-  {
-    id: "remove-tables",
-    flag: "hasTables",
-    label: "Replace tables with plain bullet sections",
-    impact: "High - Parser Compatibility",
-    desc: "Table cells are often read out of order or skipped entirely.",
-  },
-  {
-    id: "remove-graphics",
-    flag: "hasGraphics",
-    label: "Replace graphic skill bars with text descriptors",
-    impact: "Medium - Content Loss",
-    desc: "Rating icons are stripped by every major ATS.",
-  },
-  {
-    id: "large-file",
-    flag: "largeFile",
-    label: "Compress or simplify file to under 5MB",
-    impact: "Low - Upload Compatibility",
-    desc: "Some portals reject files over 5MB silently.",
-  },
-  {
-    id: "linkedin-profile",
-    flag: null,
-    label: "Sync CV timeline with your LinkedIn profile",
-    impact: "Essential - Consistency",
-    desc: "Discrepant dates trigger integrity flags in hiring systems.",
-    alwaysShow: true,
-  },
-];
+// Generates tasks with CV-specific context based on flags + result data.
+function getDynamicTasks(flags, result) {
+  const ext = result && result.fileType ? result.fileType : "pdf";
+  const stuffed = flags.stuffedKeyword || "a keyword";
+  const missingContactIssue =
+    result && result.issues
+      ? result.issues.find(
+          (i) =>
+            i.id === "missing-contact" ||
+            i.title.toLowerCase().includes("contact")
+        )
+      : null;
+  const missingContacts = missingContactIssue
+    ? missingContactIssue.title
+        .replace("Missing Contact Info (", "")
+        .replace(")", "")
+    : "contact info";
 
-function getDynamicTasks(flags) {
+  const ALL_TASKS = [
+    {
+      id: "single-col",
+      flag: "multiColumn",
+      label:
+        "Restructure to single-column layout - multi-column blocks detected",
+      impact: "High - ATS Reading",
+      desc: "Multi-column layouts cause text to merge horizontally during parsing, making job titles and dates unreadable.",
+    },
+    {
+      id: "add-metrics",
+      flag: "noMetrics",
+      label:
+        "Add quantified achievements: include %, rand values, or team sizes",
+      impact: "High - Content Score",
+      desc: "No measurable outcomes found. ATS and recruiters prioritise CVs with concrete impact numbers (e.g. 'Reduced costs by 25%').",
+    },
+    {
+      id: "fix-file-name",
+      flag: "badFileName",
+      label: `Rename "${escapeHtml(
+        result && result.fileName ? result.fileName : "your file"
+      )}" → FirstName_LastName_CV.${ext}`,
+      impact: "Medium - File Registry",
+      desc: "Spaces and special characters are stripped or garbled by older ATS databases, breaking document association.",
+    },
+    {
+      id: "fix-headers",
+      flag: "missingHeaders",
+      label: 'Add "Professional Experience" and "Education" section headings',
+      impact: "High - Readability",
+      desc: "ATS maps your employment history and qualifications using these exact header labels. Without them, your career history won't be parsed.",
+    },
+    {
+      id: "weak-headers",
+      flag: "weakHeaders",
+      label: "Replace non-standard section names with ATS-recognised labels",
+      impact: "High - Readability",
+      desc: "Creative headers like 'My Journey' or 'What I've Done' are not in ATS vocabulary - use 'Work Experience', 'Skills', 'Education'.",
+    },
+    {
+      id: "add-bullets",
+      flag: "fewBullets",
+      label:
+        "Rewrite job descriptions as bullet points starting with action verbs",
+      impact: "High - Keyword Extraction",
+      desc: "Dense paragraphs reduce keyword visibility. ATS extracts role-specific keywords from bullet-point sentences, not prose.",
+    },
+    {
+      id: "fix-contact",
+      flag: "missingContact",
+      label: `Add missing contact details at the top: ${missingContacts}`,
+      impact: "Critical - Recruiter Access",
+      desc: "Recruiters cannot advance your application without a way to reach you. Missing contact info is the most common automatic disqualifier.",
+    },
+    {
+      id: "fix-linkedin",
+      flag: "badLinkedIn",
+      label: "Fix LinkedIn URL to exact format: linkedin.com/in/yourname",
+      impact: "Medium - Contact Quality",
+      desc: "Malformed LinkedIn URLs prevent recruiters from verifying your profile and may trigger invalid-URL flags in some ATS systems.",
+    },
+    {
+      id: "add-summary",
+      flag: "noSummary",
+      label: "Write a 3–4 sentence professional summary at the top",
+      impact: "Medium - First Impression",
+      desc: "Many ATS systems extract the opening summary as the candidate profile shown to recruiters before they read the full CV.",
+    },
+    {
+      id: "fix-dates",
+      flag: "mixedDates",
+      label: "Standardise all employment dates to one format (e.g. MM/YYYY)",
+      impact: "Medium - Timeline Parsing",
+      desc: "Mixed formats like 'Jan 2022' and '01/2022' confuse tenure calculation algorithms and can produce incorrect experience duration.",
+    },
+    {
+      id: "reduce-stuffing",
+      flag: "stuffedKeyword",
+      label: `Reduce overuse of "${escapeHtml(stuffed)}" - substitute synonyms`,
+      impact: "Medium - Quality Score",
+      desc: `"${escapeHtml(
+        stuffed
+      )}" exceeds the adaptive density threshold for a CV of this length. High repetition can trigger spam filters in ATS engines.`,
+    },
+    {
+      id: "remove-tables",
+      flag: "hasTables",
+      label: "Replace table/grid structures with plain bullet-point sections",
+      impact: "High - Parser Compatibility",
+      desc: "Grid cells are often read out of order or skipped entirely by ATS engines - your skills and dates may end up on the wrong rows.",
+    },
+    {
+      id: "remove-graphics",
+      flag: "hasGraphics",
+      label:
+        'Replace graphic skill bars with text descriptors ("Advanced", "Intermediate")',
+      impact: "Medium - Content Loss",
+      desc: "Visual rating elements (stars, bars, dots) are images to the parser - every ATS strips them, leaving skill sections empty.",
+    },
+    {
+      id: "large-file",
+      flag: "largeFile",
+      label:
+        "Reduce file size below 5 MB - some portals silently reject larger files",
+      impact: "Low - Upload Compatibility",
+      desc: "File size exceeds 5 MB. Embedded images or fonts are the usual cause - remove them and save as a plain PDF.",
+    },
+    {
+      id: "linkedin-profile",
+      flag: null,
+      label: "Verify your LinkedIn timeline matches this CV exactly",
+      impact: "Essential - Consistency",
+      desc: "Discrepant job titles, dates, or employer names between your CV and LinkedIn profile trigger integrity flags in background-check systems.",
+      alwaysShow: true,
+    },
+  ];
+
   return ALL_TASKS.filter((t) => t.alwaysShow || (t.flag && flags[t.flag]));
 }
 
@@ -1656,7 +1742,13 @@ function renderDashboard(result) {
 </div>`
             )
             .join("")
-        : `<div class="empty-state">No major issues found. Your CV matches structural standards well.</div>`;
+        : `<div class="empty-state">No major structural issues found. Your CV scored ${
+            result.score
+          }/100 - ${
+            result.score >= 85
+              ? "excellent ATS compatibility."
+              : "consider minor refinements to push it higher."
+          }</div>`;
 
     const deptNote = result.deptConfidence
       ? `<span class="dept-confidence">${result.deptConfidence}% confidence</span>`
@@ -1684,7 +1776,7 @@ function renderDashboard(result) {
 
   // ── Tab: Boost / Playbook ──────────────────────────
   function tabBoost() {
-    const dynamicTasks = getDynamicTasks(result.flags || {});
+    const dynamicTasks = getDynamicTasks(result.flags || {}, result);
     // Pre-complete tasks that already pass
     const autoPassed = [];
     if (!result.flags?.multiColumn) autoPassed.push("single-col");
@@ -1734,16 +1826,33 @@ function renderDashboard(result) {
     const activeText =
       state.outreachChannel === "linkedin" ? linkedinOutreach : emailOutreach;
 
+    const remainingTasks = total - done;
+    const playbookDesc =
+      done === total
+        ? `All ${total} action items completed - your CV is structurally optimised for ATS scanning.`
+        : `${remainingTasks} action item${
+            remainingTasks !== 1 ? "s" : ""
+          } remaining, personalised to what your analysis actually flagged for <strong>${escapeHtml(
+            result.fileName
+          )}</strong>.`;
     return `
 <div class="playbook-hero">
   <div class="playbook-title">${Icons.trophy} Hiring Playbook</div>
-  <div class="playbook-desc">These tasks are personalised to what your analysis actually flagged - only relevant improvements are shown.</div>
+  <div class="playbook-desc">${playbookDesc}</div>
 </div>
 <div class="checklist-card">
-  <div class="checklist-title">CV Readiness Checklist
+  <div class="checklist-title">CV Readiness Checklist - ${escapeHtml(
+    result.department
+  )}
     <span class="task-progress-badge">${done}/${total} complete</span>
   </div>
-  <div class="checklist-subtitle">Tailored to your specific ATS results - tasks you've already passed are marked automatically.</div>
+  <div class="checklist-subtitle">${
+    done === total
+      ? "All items resolved - well done."
+      : `${done} auto-passed based on your scan results. Complete the remaining ${
+          total - done
+        } item${total - done !== 1 ? "s" : ""} to maximise ATS compatibility.`
+  }</div>
   <div class="task-progress-bar"><div style="width:${
     total > 0 ? Math.round((done / total) * 100) : 0
   }%"></div></div>
@@ -1799,12 +1908,22 @@ function renderDashboard(result) {
     .join("")}
 </div>`;
     }
+    const totalChecks =
+      result.readability.length +
+      result.formatting.length +
+      result.content.length +
+      result.fileQuality.length;
+    const passedChecks =
+      result.readability.filter((c) => c.status === "pass").length +
+      result.formatting.filter((c) => c.status === "pass").length +
+      result.content.filter((c) => c.status === "pass").length +
+      result.fileQuality.filter((c) => c.status === "pass").length;
     return `
-<h4 class="panel-heading">ATS Pattern Checklists</h4>
+<h4 class="panel-heading">ATS Pattern Checklists <span style="font-size:11px;font-weight:400;color:var(--dim);margin-left:8px;">${passedChecks}/${totalChecks} checks passed</span></h4>
 <div class="pattern-grid">
   ${section(result.readability, "Readability")}
   ${section(result.formatting, "Formatting")}
-  ${section(result.content, "Content")}
+  ${section(result.content, "Content Quality")}
   ${section(result.fileQuality, "File Quality")}
 </div>`;
   }
@@ -1830,10 +1949,28 @@ function renderDashboard(result) {
             )
             .join("")
         : `<div class="no-issues" role="status">${Icons.check}<strong>Zero Critical Issues</strong><p>Your CV passes all structural ATS heuristics cleanly.</p></div>`;
+    const errorCount = result.issues.filter(
+      (i) => i.severity === "error"
+    ).length;
+    const warnCount = result.issues.filter(
+      (i) => i.severity === "warning"
+    ).length;
+    const introText =
+      n === 0
+        ? "All structural checks passed - no ATS compatibility issues detected."
+        : `${
+            errorCount > 0
+              ? errorCount + " critical issue" + (errorCount !== 1 ? "s" : "")
+              : "No critical issues"
+          }${errorCount > 0 && warnCount > 0 ? " and " : ""}${
+            warnCount > 0
+              ? warnCount + " warning" + (warnCount !== 1 ? "s" : "")
+              : ""
+          } found. Fixing critical items first will have the most impact on your ATS pass rate.`;
     return `
 <div class="issues-intro">
   <h4 class="panel-heading" style="margin-bottom:6px;">Detected ATS Warnings</h4>
-  <p style="font-size:12px;color:var(--dim);margin-bottom:16px;line-height:1.5;">Fixing these will improve your CV's machine-readability. Items marked "Critical" have the highest impact.</p>
+  <p style="font-size:12px;color:var(--dim);margin-bottom:16px;line-height:1.5;">${introText}</p>
 </div>
 <div role="list">${cards}</div>`;
   }
