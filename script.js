@@ -22,13 +22,10 @@
    • RTF file support
    • Personalised outreach (name/skills from CV)
    • Full ARIA keyboard navigation
-   • Version shown in UI
    • Feedback link
    • Methodology transparency disclaimer
    • System font fallback (no Google Fonts network dep)
    ═══════════════════════════════════════════════════════ */
-
-const APP_VERSION = "2.1.0";
 
 /* ── STATE ────────────────────────────────────────── */
 let state = {
@@ -104,11 +101,11 @@ function stem(word) {
   if (w.endsWith("eed")) {
     if (w.length > 4) w = w.slice(0, -1);
   } else if (w.endsWith("ing")) {
-    const stem = w.slice(0, -3);
-    if (stem.length > 2) w = stem;
+    const root = w.slice(0, -3);
+    if (root.length > 2) w = root;
   } else if (w.endsWith("ed")) {
-    const stem = w.slice(0, -2);
-    if (stem.length > 2) w = stem;
+    const root = w.slice(0, -2);
+    if (root.length > 2) w = root;
   }
   // Step 2 (deduplicated)
   const step2 = [
@@ -207,8 +204,6 @@ const STOP_WORDS = new Set([
   "team",
   "company",
   "business",
-  "including",
-  "spreadsheets",
 ]);
 // Each keyword has a weight. Niche/specific terms weight more than generic ones.
 const INDUSTRIES = [
@@ -553,26 +548,15 @@ function extractTopSkills(result, limit = 3) {
 }
 
 /* ── MAIN ANALYSIS ENGINE ─────────────────────────── */
-function analyzeCV(
-  rawText,
+// Broken into named sub-functions for clarity and future Web Worker migration.
+
+function scoreFileQuality(
   fileName,
   fileSizeInBytes,
-  fileType,
-  jobDescription
+  issues,
+  suggestions,
+  flags
 ) {
-  const text = rawText.trim();
-  const lowerText = text.toLowerCase();
-  const length = text.length;
-  const wordCount = text.split(/\s+/).filter(Boolean).length;
-  const issues = [],
-    suggestions = [],
-    flags = {}; // flags drive dynamic checklist
-
-  // ── 1. DEPARTMENT (weighted + confidence) ──────────
-  const { dept: detectedDept, confidence: deptConfidence } =
-    detectDepartment(text);
-
-  // ── 2. FILE QUALITY ────────────────────────────────
   let fnScore = 100;
   const fileQualityCategories = [];
   const extension = fileName
@@ -651,7 +635,7 @@ function analyzeCV(
     status: typeStatus,
     impact: "high",
   });
-  const isTooLarge = fileSizeInBytes > 5 * 1024 * 1024; // 5MB - more realistic threshold
+  const isTooLarge = fileSizeInBytes > 5 * 1024 * 1024;
   fileQualityCategories.push({
     id: "filesize",
     title: "File Size",
@@ -669,8 +653,10 @@ function analyzeCV(
     fnScore -= 10;
     flags.largeFile = true;
   }
+  return { fnScore, fileQualityCategories };
+}
 
-  // ── 3. FORMATTING ──────────────────────────────────
+function scoreFormatting(text, lowerText, issues, suggestions, flags) {
   let fmtScore = 100;
   const formattingCategories = [];
   const lines = text.split("\n");
@@ -780,10 +766,15 @@ function analyzeCV(
         'Use text descriptors: "Advanced", "Intermediate", "Beginner".',
     });
   }
+  return { fmtScore, formattingCategories };
+}
 
-  // ── 4. READABILITY ─────────────────────────────────
+function scoreReadability(text, lowerText, issues, suggestions, flags) {
   let readScore = 100;
   const readabilityCategories = [];
+  const wordCount = text.split(/\s+/).filter(Boolean).length;
+
+  // Section headers
   const hasExpHeader =
     /(experience|work|employment|career|history|professional|position)/i.test(
       lowerText
@@ -987,8 +978,18 @@ function analyzeCV(
     status: contactStatus,
     impact: "high",
   });
+  return { readScore, readabilityCategories };
+}
 
-  // ── 5. CONTENT QUALITY ─────────────────────────────
+function scoreContent(
+  text,
+  lowerText,
+  wordCount,
+  detectedDept,
+  issues,
+  suggestions,
+  flags
+) {
   let cntScore = 100;
   const contentCategories = [];
   const hasSummary =
@@ -1011,7 +1012,6 @@ function analyzeCV(
     flags.noSummary = true;
   }
 
-  // Contextual metrics - look for impact verbs + numbers together
   const impactPhrases = (
     text.match(
       /\b(led|grew|reduced|increased|improved|managed|delivered|achieved|built|launched|saved|generated|drove|scaled|optimised|optimized)\b/gi
@@ -1137,7 +1137,6 @@ function analyzeCV(
     });
   }
 
-  // Caps overuse
   const capsWords = (text.match(/\b[A-Z]{6,}\b/g) || []).filter(
     (w) =>
       ![
@@ -1176,82 +1175,151 @@ function analyzeCV(
       fixMessage: "Use Sentence Case for all body text except acronyms.",
     });
   }
+  return { cntScore, contentCategories };
+}
 
-  // ── 6. KEYWORD / JD MATCHING (with stemming) ───────
-  let keywordsResult = null,
-    jdKwScore = 0;
-  if (jobDescription && jobDescription.trim().length > 10) {
-    const jdClean = jobDescription.toLowerCase().replace(/[^a-z0-9#+\s]/g, " ");
-    // Build stem → original token map so the UI shows readable words
-    const wordFreq = {};
-    const stemToOriginal = {};
-    jdClean.split(/\s+/).forEach((w) => {
-      if (w.length > 3 && !STOP_WORDS.has(w) && isNaN(Number(w))) {
+function scoreKeywords(
+  lowerText,
+  wordCount,
+  jobDescription,
+  issues,
+  suggestions,
+  flags
+) {
+  if (!jobDescription || jobDescription.trim().length <= 10)
+    return { keywordsResult: null, jdKwScore: 0 };
+  const jdClean = jobDescription.toLowerCase().replace(/[^a-z0-9#+\s]/g, " ");
+  const wordFreq = {};
+  const stemToOriginal = {};
+  jdClean.split(/\s+/).forEach((w) => {
+    if (w.length > 3 && !STOP_WORDS.has(w) && isNaN(Number(w))) {
+      const s = stem(w);
+      if (!stemToOriginal[s]) stemToOriginal[s] = w;
+      // Cap JD term frequency at 3 to prevent inflated match scores from stuffed JDs
+      wordFreq[s] = Math.min((wordFreq[s] || 0) + 1, 3);
+    }
+  });
+  const topKW = Object.entries(wordFreq)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 25)
+    .map((e) => e[0]);
+  const cvStemmed = {};
+  lowerText
+    .replace(/[^a-z\s]/gi, "")
+    .split(/\s+/)
+    .forEach((w) => {
+      if (w.length > 3) {
         const s = stem(w);
-        if (!stemToOriginal[s]) stemToOriginal[s] = w; // keep first occurrence
-        wordFreq[s] = (wordFreq[s] || 0) + 1;
+        cvStemmed[s] = (cvStemmed[s] || 0) + 1;
       }
     });
-    const topKW = Object.entries(wordFreq)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 25)
-      .map((e) => e[0]);
-
-    const cvStemmed = {};
-    lowerText
-      .replace(/[^a-z\s]/gi, "")
-      .split(/\s+/)
-      .forEach((w) => {
-        if (w.length > 3) {
-          const s = stem(w);
-          cvStemmed[s] = (cvStemmed[s] || 0) + 1;
-        }
-      });
-
-    const matched = [],
-      missing = [],
-      density = [];
-    topKW.forEach((kw) => {
-      const displayWord = stemToOriginal[kw] || kw; // show original token
-      const count = cvStemmed[kw] || 0;
-      const pct =
-        wordCount > 0 ? parseFloat(((count / wordCount) * 100).toFixed(2)) : 0;
-      const status = count === 0 ? "low" : pct > 3 ? "stuffed" : "good";
-      if (count > 0) {
-        matched.push({ word: displayWord, count });
-        density.push({ word: displayWord, count, density: pct, status });
-      } else missing.push(displayWord);
+  const matched = [],
+    missing = [],
+    density = [];
+  topKW.forEach((kw) => {
+    const displayWord = stemToOriginal[kw] || kw;
+    const count = cvStemmed[kw] || 0;
+    const pct =
+      wordCount > 0 ? parseFloat(((count / wordCount) * 100).toFixed(2)) : 0;
+    const status = count === 0 ? "low" : pct > 3 ? "stuffed" : "good";
+    if (count > 0) {
+      matched.push({ word: displayWord, count });
+      density.push({ word: displayWord, count, density: pct, status });
+    } else missing.push(displayWord);
+  });
+  const matchPct =
+    topKW.length > 0 ? Math.round((matched.length / topKW.length) * 100) : 0;
+  const keywordsResult = {
+    matchPercentage: matchPct,
+    matched,
+    missing,
+    density,
+  };
+  flags.hasJD = true;
+  if (missing.length > 0) {
+    issues.push({
+      category: "content",
+      title: `${missing.length} Missing JD Keywords`,
+      description: `Not found (stem-matched): ${missing
+        .slice(0, 4)
+        .map((w) => `"${w}"`)
+        .join(", ")}.`,
+      severity: "warning",
+      fixMessage:
+        "Weave missing keywords naturally into your experience bullets.",
     });
-    const matchPct =
-      topKW.length > 0 ? Math.round((matched.length / topKW.length) * 100) : 0;
-    keywordsResult = { matchPercentage: matchPct, matched, missing, density };
-    jdKwScore = matchPct;
-    flags.hasJD = true;
-    if (missing.length > 0) {
-      issues.push({
-        category: "content",
-        title: `${missing.length} Missing JD Keywords`,
-        description: `Not found (stem-matched): ${missing
-          .slice(0, 4)
-          .map((w) => `"${w}"`)
-          .join(", ")}.`,
-        severity: "warning",
-        fixMessage:
-          "Weave missing keywords naturally into your experience bullets.",
-      });
-      suggestions.push({
-        id: "s_keywords",
-        category: "Keyword Match",
-        title: "Add Missing JD Keywords",
-        description:
-          "Stem-matched keywords from the job description not found in your CV.",
-        actionable: `Naturally incorporate: "${missing
-          .slice(0, 3)
-          .join('", "')}" into your experience.`,
-      });
-    }
+    suggestions.push({
+      id: "s_keywords",
+      category: "Keyword Match",
+      title: "Add Missing JD Keywords",
+      description:
+        "Stem-matched keywords from the job description not found in your CV.",
+      actionable: `Naturally incorporate: "${missing
+        .slice(0, 3)
+        .join('", "')}" into your experience.`,
+    });
   }
+  return { keywordsResult, jdKwScore: matchPct };
+}
 
+function analyzeCV(
+  rawText,
+  fileName,
+  fileSizeInBytes,
+  fileType,
+  jobDescription
+) {
+  const text = rawText.trim();
+  const lowerText = text.toLowerCase();
+  const length = text.length;
+  const wordCount = text.split(/\s+/).filter(Boolean).length;
+  const issues = [],
+    suggestions = [],
+    flags = {}; // flags drive dynamic checklist
+
+  // ── 1. DEPARTMENT (weighted + confidence) ──────────
+  const { dept: detectedDept, confidence: deptConfidence } =
+    detectDepartment(text);
+
+  // ── 2–6. SUB-SCORED SECTIONS ───────────────────────
+  const { fnScore, fileQualityCategories } = scoreFileQuality(
+    fileName,
+    fileSizeInBytes,
+    issues,
+    suggestions,
+    flags
+  );
+  const { fmtScore, formattingCategories } = scoreFormatting(
+    text,
+    lowerText,
+    issues,
+    suggestions,
+    flags
+  );
+  const { readScore, readabilityCategories } = scoreReadability(
+    text,
+    lowerText,
+    issues,
+    suggestions,
+    flags
+  );
+  const { cntScore, contentCategories } = scoreContent(
+    text,
+    lowerText,
+    wordCount,
+    detectedDept,
+    issues,
+    suggestions,
+    flags
+  );
+  const { keywordsResult, jdKwScore } = scoreKeywords(
+    lowerText,
+    wordCount,
+    jobDescription,
+    issues,
+    suggestions,
+    flags
+  );
   // ── 7. ADAPTIVE SCORE WEIGHTS ──────────────────────
   // Weights shift based on what information is available and which CV type.
   // If JD present: keywords carry 40%; without JD: content carries more.
@@ -2088,8 +2156,6 @@ ${
         <span class="dash-dept">${Icons.building} <strong>${escapeHtml(
     result.department
   )}</strong></span>
-        <span class="dot" aria-hidden="true">•</span>
-        <span class="version-badge">v${APP_VERSION}</span>
       </div>
     </div>
   </div>
@@ -2270,8 +2336,7 @@ document.addEventListener("click", function (e) {
     saveSession();
   } else if (action === "report-feedback") {
     window.open(
-      "mailto:tujar.developer@gmail.com?subject=JobFit%20Feedback&body=Version%3A%20" +
-        APP_VERSION,
+      "mailto:tujar.developer@gmail.com?subject=JobFit%20Feedback",
       "_blank"
     );
   }
@@ -2424,22 +2489,37 @@ async function processFile(file) {
     if (ext === "txt" || ext === "rtf") {
       showProgress("Extracting text…");
       let text = await file.text();
-      // Strip RTF control codes if RTF
+      // Strip RTF control codes if RTF — preserve line breaks for section detection
       if (ext === "rtf") {
+        // Replace RTF paragraph marks (\par, \pard) with newlines before stripping
         text = text
+          .replace(/\\par[d ]?/gi, "\n")
           .replace(/\{\\[^{}]*\}/g, "")
           .replace(/\\[a-z]+\d* ?/g, "")
           .replace(/[{}]/g, "")
-          .replace(/\r\n|\n/g, " ")
+          .replace(/\r\n/g, "\n")
+          .replace(/[ \t]+/g, " ")
           .trim();
         if (text.length < 20)
           throw new Error(
             "Could not extract readable text from RTF. Try saving as .docx or .pdf first."
           );
+        showFeedback(
+          "success",
+          `Read ${file.name} (${formatBytes(
+            file.size
+          )}) — RTF extraction is approximate; PDF or DOCX gives more accurate scores.`
+        );
       }
       state.cvText = text;
       dzSub.textContent = "File loaded. Drop another to replace.";
-      showFeedback("success", `Read ${file.name} (${formatBytes(file.size)})`);
+      // RTF already showed its own feedback with accuracy caveat above
+      if (ext !== "rtf") {
+        showFeedback(
+          "success",
+          `Read ${file.name} (${formatBytes(file.size)})`
+        );
+      }
       updateAnalyzeBtn();
       saveSession();
     } else if (ext === "docx") {
@@ -2478,7 +2558,14 @@ async function processFile(file) {
         showProgress(`Extracting page ${i} of ${pdf.numPages}…`);
         const page = await pdf.getPage(i);
         const tc = await page.getTextContent();
-        text += tc.items.map((it) => it.str).join(" ") + "\n";
+        // Sort items by Y-position descending (top→bottom), then X ascending (left→right)
+        // tc.items[].transform is a 6-element matrix; [4]=x, [5]=y
+        const sorted = [...tc.items].sort((a, b) => {
+          const dy = b.transform[5] - a.transform[5];
+          if (Math.abs(dy) > 2) return dy; // different lines
+          return a.transform[4] - b.transform[4]; // same line: left→right
+        });
+        text += sorted.map((it) => it.str).join(" ") + "\n";
       }
       if (text.trim().length < 10)
         throw new Error(
@@ -2602,9 +2689,9 @@ function attachUploadListeners() {
           state.jobDescription
         );
         showDashboard(result);
-        // Ping counter once per page session
-        if (!attachUploadListeners._pinged) {
-          attachUploadListeners._pinged = true;
+        // Ping counter once per page session (persisted in sessionStorage)
+        if (!sessionStorage.getItem("jobfit_pinged")) {
+          sessionStorage.setItem("jobfit_pinged", "1");
           fetch("https://jobfit-counter.tumelo-segale.workers.dev/ping", {
             method: "POST",
           })
@@ -2649,6 +2736,15 @@ document.addEventListener("DOMContentLoaded", function () {
       document.getElementById("jd-chars").textContent =
         "Characters: " + state.jobDescription.length;
       document.getElementById("jd-clear").classList.remove("hidden");
+    }
+    // Restore dropzone display to reflect the previously uploaded file
+    if (state.cvFileName && state.inputMode === "upload") {
+      const dzTitle = document.getElementById("dz-title");
+      const dzSub = document.getElementById("dz-sub");
+      const dzBadges = document.getElementById("dz-badges");
+      if (dzTitle) dzTitle.textContent = state.cvFileName;
+      if (dzSub) dzSub.textContent = "File loaded. Drop another to replace.";
+      if (dzBadges) dzBadges.style.display = "none";
     }
     // Still attach upload listeners so "New Analysis" returns to a working form
     attachUploadListeners();
