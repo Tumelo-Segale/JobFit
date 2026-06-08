@@ -16,6 +16,9 @@ let state = {
   scoreAnimated: false, // animate ring only once
 };
 
+/* -- GUARD FLAGS ------------------------------------ */
+let _uploadListenersAttached = false;
+
 /* -- SESSION PERSISTENCE ---------------------------- */
 const SESSION_KEY = "jobfit_session_v2";
 
@@ -2961,7 +2964,7 @@ function showFeedback(type, msg) {
       : `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" width="15" height="15" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>`;
   document.getElementById(
     "feedback-wrap"
-  ).innerHTML = `<div class="feedback-banner ${type}" role="alert">${icon}<span>${msg}</span></div>`;
+  ).innerHTML = `<div class="feedback-banner ${type}" role="alert">${icon}<span>${escapeHtml(msg)}</span></div>`;
 }
 /**
  * Replaces the feedback area with an animated progress spinner and
@@ -2975,7 +2978,7 @@ function showFeedback(type, msg) {
 function showProgress(msg) {
   document.getElementById(
     "feedback-wrap"
-  ).innerHTML = `<div class="feedback-banner progress" role="status" aria-live="polite"><div class="progress-spinner"></div><span>${msg}</span></div>`;
+  ).innerHTML = `<div class="feedback-banner progress" role="status" aria-live="polite"><div class="progress-spinner"></div><span>${escapeHtml(msg)}</span></div>`;
 }
 /**
  * Clears any visible feedback or progress banner from `#feedback-wrap`.
@@ -3112,7 +3115,7 @@ async function processFile(file) {
         throw new Error(
           "PDF.js is still loading. Wait a moment or use Direct Editor."
         );
-      lib.GlobalWorkerOptions.workerSrc = "pdf.worker.min.js";
+      lib.GlobalWorkerOptions.workerSrc = new URL("pdf.worker.min.js", document.baseURI).href;
       const ab = await file.arrayBuffer();
       showProgress("Loading PDF pages…");
       const pdf = await lib.getDocument({ data: ab }).promise;
