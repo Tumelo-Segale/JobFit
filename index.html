@@ -234,14 +234,13 @@
   <script defer src="https://static.cloudflareinsights.com/beacon.min.js"
     data-cf-beacon='{"token": "1f4a0c0262314aa08df9cadc4e681efb"}'></script>
 
-  <!-- CV counter: fetches from the jobfit-counter Worker proxy (token never reaches browser) -->
+  <!-- CV counter: fetches from the jobfit-counter Worker (token never reaches browser) -->
   <script>
     (function () {
       async function loadCounter() {
         const el = document.getElementById('cv-counter-value');
         if (!el) return;
         try {
-          // Worker URL - replace with your actual deployed worker subdomain
           const res = await fetch('https://jobfit-counter.tumelo-segale.workers.dev/');
           if (!res.ok) throw new Error();
           const data = await res.json();
