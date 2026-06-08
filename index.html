@@ -234,26 +234,11 @@
   <script defer src="https://static.cloudflareinsights.com/beacon.min.js"
     data-cf-beacon='{"token": "1f4a0c0262314aa08df9cadc4e681efb"}'></script>
 
-  <!-- CV counter: fetches from the jobfit-counter Worker (token never reaches browser) -->
+  <!-- CV counter: display is updated by script.js after each analysis run.
+       No fetch on page load — the worker increments on every GET call,
+       so a page-load read would count visits rather than CV submissions. -->
   <script>
     (function () {
-      async function loadCounter() {
-        const el = document.getElementById('cv-counter-value');
-        if (!el) return;
-        try {
-          const res = await fetch('https://jobfit-counter.tumelo-segale.workers.dev/');
-          if (!res.ok) throw new Error();
-          const data = await res.json();
-          if (data.count != null) {
-            el.textContent = Number(data.count).toLocaleString();
-          } else {
-            el.textContent = '-';
-          }
-        } catch (_) {
-          el.textContent = '-';
-        }
-      }
-      loadCounter();
 
       // Hint popup toggle
       const btn = document.getElementById('cv-counter-hint-btn');
