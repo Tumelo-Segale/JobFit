@@ -1,4 +1,4 @@
-/* ── CSS Variables ─────────────────────────────────── */
+/* -- CSS Variables ----------------------------------- */
 :root {
   --bg: #0a0a0a;
   --card: #151515;
@@ -20,7 +20,7 @@
     "SF Mono", Consolas, "Liberation Mono", monospace;
 }
 
-/* ── Reset ─────────────────────────────────────────── */
+/* -- Reset ------------------------------------------- */
 *,
 *::before,
 *::after {
@@ -41,7 +41,7 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-/* ── Scrollbar ─────────────────────────────────────── */
+/* -- Scrollbar --------------------------------------- */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -60,7 +60,7 @@ body {
   background: var(--border2);
 }
 
-/* ── Typography helpers ────────────────────────────── */
+/* -- Typography helpers ------------------------------ */
 .mono {
   font-family: var(--mono);
 }
@@ -81,7 +81,7 @@ body {
   color: var(--orange);
 }
 
-/* ── Accessibility helpers ─────────────────────────── */
+/* -- Accessibility helpers --------------------------- */
 .visually-hidden {
   position: absolute;
   width: 1px;
@@ -94,7 +94,7 @@ body {
   border: 0;
 }
 
-/* ── Utility ───────────────────────────────────────── */
+/* -- Utility ----------------------------------------- */
 .hidden {
   display: none !important;
 }
@@ -161,7 +161,7 @@ body {
   white-space: nowrap;
 }
 
-/* ── Animations ────────────────────────────────────── */
+/* -- Animations -------------------------------------- */
 @keyframes fadeUp {
   from {
     opacity: 0;
@@ -236,7 +236,7 @@ body {
   animation: fadeIn 0.25s ease both;
 }
 
-/* ── Header ────────────────────────────────────────── */
+/* -- Header ------------------------------------------ */
 header {
   position: sticky;
   top: 0;
@@ -292,14 +292,14 @@ header {
   margin-top: 1px;
 }
 
-/* ── Main layout ───────────────────────────────────── */
+/* -- Main layout ------------------------------------- */
 main {
   max-width: 1200px;
   margin: 0 auto;
   padding: 40px 24px 60px;
 }
 
-/* ── Hero ──────────────────────────────────────────── */
+/* -- Hero -------------------------------------------- */
 #hero {
   text-align: center;
   max-width: 640px;
@@ -322,7 +322,7 @@ main {
   line-height: 1.6;
 }
 
-/* ── Card container ────────────────────────────────── */
+/* -- Card container ---------------------------------- */
 .card {
   background: var(--card);
   border: 1px solid var(--border);
@@ -338,7 +338,7 @@ main {
   padding: 20px;
 }
 
-/* ── Upload section ────────────────────────────────── */
+/* -- Upload section ---------------------------------- */
 #upload-section h2.section-title {
   font-size: 22px;
   font-weight: 800;
@@ -639,7 +639,7 @@ main {
   animation: spin 0.7s linear infinite;
 }
 
-/* ── Explainer cards ───────────────────────────────── */
+/* -- Explainer cards --------------------------------- */
 .explainer {
   margin-top: 40px;
 }
@@ -697,7 +697,7 @@ main {
   line-height: 1.6;
 }
 
-/* ── Footer ────────────────────────────────────────── */
+/* -- Footer ------------------------------------------ */
 footer {
   border-top: 1px solid var(--border);
   background: var(--bg);
@@ -836,7 +836,7 @@ footer {
   }
 }
 
-/* ── Score card ──────────────────────── */
+/* -- Score card ------------------------ */
 .score-card {
   background: var(--bg);
   border: 1px solid var(--border);
@@ -1012,7 +1012,7 @@ footer {
   background: var(--orange);
 }
 
-/* ── Tabs ────────────────────────────── */
+/* -- Tabs ------------------------------ */
 .tab-bar {
   display: flex;
   flex-wrap: nowrap;
@@ -1061,7 +1061,7 @@ footer {
   min-height: 400px;
 }
 
-/* ── Suggestion cards ────────────────── */
+/* -- Suggestion cards ------------------ */
 .suggestion-card {
   display: flex;
   align-items: flex-start;
@@ -1130,7 +1130,7 @@ footer {
   margin-top: 20px;
 }
 
-/* ── Hiring Playbook ─────────────────── */
+/* -- Hiring Playbook ------------------- */
 .playbook-hero {
   padding: 22px;
   background: linear-gradient(120deg, var(--bg), #111);
@@ -1409,7 +1409,7 @@ footer {
   height: 13px;
 }
 
-/* ── Pattern rules ───────────────────── */
+/* -- Pattern rules --------------------- */
 .pattern-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -1525,7 +1525,7 @@ footer {
   border-color: rgba(239, 68, 68, 0.2);
 }
 
-/* ── Issues tab ──────────────────────── */
+/* -- Issues tab ------------------------ */
 .issues-intro p {
   font-size: 12px;
   color: var(--dim);
@@ -1630,7 +1630,7 @@ footer {
   margin-bottom: 4px;
 }
 
-/* ── Mobile Responsiveness ─────────────────────────── */
+/* -- Mobile Responsiveness --------------------------- */
 @media (max-width: 600px) {
   main {
     padding: 20px 14px 48px;
@@ -1787,12 +1787,12 @@ footer {
    JOBFIT v2.0 - NEW COMPONENT STYLES
    ═══════════════════════════════════════════════════════ */
 
-/* ── System font preload note ────────────────────── */
+/* -- System font preload note ---------------------- */
 /* Google Fonts CDN link removed - system font stack
    ensures fully offline operation. Outfit & JetBrains
    Mono will render if installed; system sans/mono fallback. */
 
-/* ── Utility additions ───────────────────────────── */
+/* -- Utility additions ----------------------------- */
 .hero-sub {
   color: var(--dim);
   font-weight: 700;
@@ -1850,7 +1850,7 @@ footer {
   color: var(--border2);
 }
 
-/* ── Header actions ──────────────────────────────── */
+/* -- Header actions -------------------------------- */
 .header-actions {
   display: flex;
   align-items: center;
@@ -1876,7 +1876,7 @@ footer {
   flex-shrink: 0;
 }
 
-/* ── Department banner ───────────────────────────── */
+/* -- Department banner ----------------------------- */
 .dept-banner {
   display: flex;
   align-items: flex-start;
@@ -1915,7 +1915,7 @@ footer {
   line-height: 1.5;
 }
 
-/* ── Score explanation ───────────────────────────── */
+/* -- Score explanation ----------------------------- */
 .score-explain-btn {
   display: inline-flex;
   align-items: center;
@@ -2056,7 +2056,7 @@ footer {
   color: var(--orange);
 }
 
-/* ── Privacy box ─────────────────────────────────── */
+/* -- Privacy box ----------------------------------- */
 .privacy-box {
   display: flex;
   align-items: flex-start;
@@ -2085,7 +2085,7 @@ footer {
   font-weight: 700;
 }
 
-/* ── Suggestion right column ─────────────────────── */
+/* -- Suggestion right column ----------------------- */
 .sug-right {
   flex: 1;
   display: flex;
@@ -2094,7 +2094,7 @@ footer {
   text-align: right;
 }
 
-/* ── Progress feedback ───────────────────────────── */
+/* -- Progress feedback ----------------------------- */
 .feedback-banner.progress {
   background: rgba(16, 185, 129, 0.06);
   border-color: rgba(16, 185, 129, 0.2);
@@ -2110,7 +2110,7 @@ footer {
   flex-shrink: 0;
 }
 
-/* ── Dynamic task additions ──────────────────────── */
+/* -- Dynamic task additions ------------------------ */
 .task-progress-badge {
   font-size: 10px;
   font-family: var(--mono);
@@ -2149,7 +2149,7 @@ footer {
   outline-offset: 2px;
 }
 
-/* ── Dashboard header additions ──────────────────── */
+/* -- Dashboard header additions -------------------- */
 .dash-header-left {
   display: flex;
   align-items: flex-start;
@@ -2162,7 +2162,7 @@ footer {
   min-width: 0;
 }
 
-/* ── Keyword tab ─────────────────────────────────── */
+/* -- Keyword tab ----------------------------------- */
 .kw-match-banner {
   display: flex;
   align-items: center;
@@ -2259,7 +2259,7 @@ footer {
   text-align: right;
 }
 
-/* ── Outreach editable hint ──────────────────────── */
+/* -- Outreach editable hint ------------------------ */
 .outreach-editable-hint {
   display: flex;
   align-items: center;
@@ -2275,7 +2275,7 @@ footer {
   flex-shrink: 0;
 }
 
-/* ── Explainer disclaimer ────────────────────────── */
+/* -- Explainer disclaimer -------------------------- */
 .explainer-disclaimer {
   margin-top: 14px;
   padding: 10px 12px;
@@ -2304,7 +2304,7 @@ footer {
   flex-shrink: 0;
 }
 
-/* ── CV Counter ────────────────────────────────────── */
+/* -- CV Counter -------------------------------------- */
 .cv-counter-row {
   display: inline-flex;
   align-items: center;
@@ -2420,7 +2420,7 @@ footer {
   border-top: 1px solid var(--border2);
 }
 
-/* ── Feedback text hide on mobile ──────────────────── */
+/* -- Feedback text hide on mobile -------------------- */
 @media (max-width: 600px) {
   .feedback-text {
     display: none;
@@ -2449,7 +2449,7 @@ footer {
   }
 }
 
-/* ── Footer links ────────────────────────────────── */
+/* -- Footer links ---------------------------------- */
 .footer-links {
   display: flex;
   gap: 12px;
@@ -2464,7 +2464,7 @@ footer {
   color: var(--dim);
 }
 
-/* ── Pattern grid responsive fix (700-900px) ─────── */
+/* -- Pattern grid responsive fix (700-900px) ------- */
 @media (min-width: 601px) and (max-width: 920px) {
   .pattern-grid {
     grid-template-columns: 1fr;
@@ -2727,7 +2727,7 @@ footer {
   }
 }
 
-/* ── Base icon sizing ─────────────────────────────── */
+/* -- Base icon sizing ------------------------------- */
 /* Icons in the Icons{} object carry width/height="1em", so they
    inherit font-size from their context. This single rule is all
    that's needed for sizing - the large per-context block below is
@@ -2750,7 +2750,7 @@ svg {
   height: unset;
 }
 
-/* ── Re-run button ────────────────────────────────── */
+/* -- Re-run button ---------------------------------- */
 .dash-header-actions {
   display: flex;
   align-items: center;

@@ -1,33 +1,5 @@
 "use strict";
-
-/* ═══════════════════════════════════════════════════════
-   JOBFIT v2.0 - CSP-COMPLIANT, FULLY OFFLINE
-   ─────────────────────────────────────────────────────
-   All improvements from v1 audit:
-   • Contextual scoring with weighted confidence
-   • Porter-style stemming for JD keyword matching
-   • Adaptive department detection (TF-IDF-like scoring)
-   • Dynamic adaptive threshold for keyword stuffing
-   • Dynamic checklist tasks (only flags relevant items)
-   • sessionStorage persistence across reloads
-   • Score ring animates once - no replay on tab switch
-   • Score breakdown tooltip/panel
-   • Tab state preserved across re-runs
-   • Progress feedback during file parsing
-   • "All Clear" label when 0 warnings
-   • Outreach template channels persisted (no reset on switch)
-   • Report export: Markdown copy & print/PDF
-   • LinkedIn URL format validation
-   • Spell-check integration via browser spellcheck
-   • RTF file support
-   • Personalised outreach (name/skills from CV)
-   • Full ARIA keyboard navigation
-   • Feedback link
-   • Methodology transparency disclaimer
-   • System font fallback (no Google Fonts network dep)
-   ═══════════════════════════════════════════════════════ */
-
-/* ── STATE ────────────────────────────────────────── */
+/* -- STATE ------------------------------------------ */
 let state = {
   cvText: "",
   cvFileName: "",
@@ -44,8 +16,20 @@ let state = {
   scoreAnimated: false, // animate ring only once
 };
 
-/* ── SESSION PERSISTENCE ──────────────────────────── */
+/* -- SESSION PERSISTENCE ---------------------------- */
 const SESSION_KEY = "jobfit_session_v2";
+
+/**
+ * Persists the current application state to sessionStorage so the user's
+ * CV text, analysis results, and UI preferences (active tab, outreach edits,
+ * checklist progress) survive a page reload within the same browser tab.
+ *
+ * `_rawText` is stripped before serialising - it duplicates `state.cvText`
+ * and would otherwise double the storage cost on every call.
+ *
+ * Silently swallows errors so storage-quota limits or private-browsing
+ * restrictions never crash the app.
+ */
 function saveSession() {
   try {
     // Strip _rawText (already in state.cvText) before serialising to avoid
@@ -66,6 +50,13 @@ function saveSession() {
     sessionStorage.setItem(SESSION_KEY, JSON.stringify(snap));
   } catch (_) {}
 }
+/**
+ * Attempts to rehydrate `state` from a previously saved sessionStorage
+ * snapshot (written by `saveSession`).
+ *
+ * @returns {boolean} `true` if a valid snapshot was found and merged into
+ *   `state`; `false` if sessionStorage is empty, unparseable, or unavailable.
+ */
 function loadSession() {
   try {
     const raw = sessionStorage.getItem(SESSION_KEY);
@@ -77,19 +68,51 @@ function loadSession() {
     return false;
   }
 }
+/**
+ * Removes the JobFit session snapshot from sessionStorage, effectively
+ * resetting the app to a clean state on the next page load.
+ * Called when the user clicks "New Analysis" or the back button.
+ */
 function clearSession() {
   try {
     sessionStorage.removeItem(SESSION_KEY);
   } catch (_) {}
 }
 
-/* ── DEBOUNCED SESSION SAVE ────────────────────────── */
+/* -- DEBOUNCED SESSION SAVE -------------------------- */
 let _saveSessionTimer = null;
+/**
+ * Debounced wrapper around `saveSession`.
+ * Defers the actual write by 300 ms so rapid keystrokes in the CV or JD
+ * textareas don't trigger a sessionStorage write on every single character.
+ * Any pending timer is cancelled and restarted on each call.
+ */
 function saveSessionDebounced() {
   clearTimeout(_saveSessionTimer);
   _saveSessionTimer = setTimeout(saveSession, 300);
 }
-// Reduces words to approximate stems so "engineer" matches "engineering", etc.
+/**
+ * Applies a lightweight subset of the Porter stemming algorithm to reduce
+ * English words to approximate root forms, enabling fuzzy keyword matching.
+ *
+ * For example:
+ *   "engineering" → "engineer"
+ *   "managed"     → "manag"
+ *   "organizational" → "organiz"
+ *
+ * Steps implemented:
+ *   1a - plural/suffix removal (sses, ies, s)
+ *   1b - verb ending removal (ing, ed, eed)
+ *   Step 2 - common suffix substitutions (ational→ate, tional→tion, etc.)
+ *   Step 3 - final suffix cleanup (icate, alize, ful, ness, al, er, ic …)
+ *
+ * Words of 3 characters or fewer are returned unchanged to avoid
+ * over-stemming short tokens like "css" or "api".
+ *
+ * @param {string} word - A single lowercase token to stem.
+ * @returns {string} The stemmed form, or the original lowercased word if
+ *   the result would be shorter than 3 characters.
+ */
 function stem(word) {
   let w = word.toLowerCase().trim();
   if (w.length <= 3) return w;
@@ -141,7 +164,7 @@ function stem(word) {
   return w.length > 2 ? w : word.toLowerCase();
 }
 
-/* ── SHARED STOP WORDS ────────────────────────────── */
+/* -- SHARED STOP WORDS ------------------------------ */
 const STOP_WORDS = new Set([
   // JD boilerplate
   "with",
@@ -436,6 +459,13 @@ const INDUSTRIES = [
   },
 ];
 
+/**
+ * Converts a raw byte count into a human-readable file-size string.
+ *
+ * @param {number} b - File size in bytes.
+ * @returns {string} Formatted string, e.g. "245.3 KB" or "1.2 MB".
+ *   Returns "0 B" for falsy inputs.
+ */
 function formatBytes(b) {
   if (!b) return "0 B";
   const k = 1024,
@@ -444,9 +474,29 @@ function formatBytes(b) {
   return parseFloat((b / Math.pow(k, i)).toFixed(1)) + " " + s[i];
 }
 
-/* ── CONTEXT SCORER ───────────────────────────────── */
-// Instead of raw keyword counting, score by weighted unique keyword presence.
-// This prevents a 500-word repeat of "compliance" beating a genuine legal CV.
+/* -- CONTEXT SCORER --------------------------------- */
+/**
+ * Identifies the most likely professional department/industry for a CV
+ * using a TF-IDF-inspired weighted keyword scoring approach.
+ *
+ * Each industry in `INDUSTRIES` has a set of keywords with importance
+ * weights (v). For each keyword found in the text, its contribution is:
+ *   min(occurrenceCount, 3) × weight
+ * Capping at 3 occurrences prevents a CV that repeats one buzzword from
+ * dominating the score (keyword stuffing resistance).
+ *
+ * A department is only considered a valid match if at least 3 unique
+ * keyword *types* from its list are present, ensuring a minimum breadth
+ * of signal before making a classification.
+ *
+ * Confidence is calculated as the percentage gap between the top scorer
+ * and second-best scorer - a tight gap means ambiguous classification.
+ *
+ * @param {string} text - The full raw CV text.
+ * @returns {{ dept: string, confidence: number }} The detected department
+ *   name and a 0–100 confidence score. Defaults to "General Career Path"
+ *   when no industry reaches the minimum keyword threshold.
+ */
 function detectDepartment(text) {
   const lower = text.toLowerCase();
   let bestDept = "General Career Path",
@@ -490,15 +540,41 @@ function detectDepartment(text) {
   return { dept: bestDept, confidence };
 }
 
-/* ── DYNAMIC STUFFING THRESHOLD ───────────────────── */
-// Scale threshold to document length so a 1500-word CV isn't penalised for
-// longer paragraphs the way a 300-word CV would be.
+/**
+ * Calculates the adaptive keyword-stuffing detection threshold for a
+ * given document length. Longer CVs naturally repeat words more often,
+ * so a fixed threshold would unfairly penalise them.
+ *
+ * Formula: max(8, min(30, round(wordCount × 0.025)))
+ *   - Minimum: 8 occurrences  (prevents false positives on short CVs)
+ *   - Maximum: 30 occurrences (prevents the threshold from growing
+ *     so large that stuffing goes undetected on very long documents)
+ *
+ * @param {number} wordCount - Total word count of the CV.
+ * @returns {number} The maximum times a single non-stopword may appear
+ *   before it is flagged as potentially stuffed.
+ */
 function stuffingThreshold(wordCount) {
   // Base: ~2.5% of word count, minimum 8, maximum 30
   return Math.max(8, Math.min(30, Math.round(wordCount * 0.025)));
 }
 
-/* ── LINKEDIN URL VALIDATOR ───────────────────────── */
+/**
+ * Validates whether a string is a well-formed LinkedIn profile URL.
+ *
+ * Accepted formats (all produce a `true` result):
+ *   - linkedin.com/in/username
+ *   - www.linkedin.com/in/username
+ *   - https://linkedin.com/in/username
+ *   - https://www.linkedin.com/in/username (with optional trailing slash)
+ *
+ * The username portion must be 3–100 characters using only letters,
+ * digits, hyphens, and underscores - matching LinkedIn's own rules.
+ *
+ * @param {string} url - The URL or partial URL to validate.
+ * @returns {boolean} `true` if the URL matches the standard LinkedIn
+ *   profile pattern; `false` otherwise.
+ */
 function validateLinkedIn(url) {
   // Must be: linkedin.com/in/username (3-100 chars, no spaces, valid chars)
   const pattern =
@@ -506,9 +582,25 @@ function validateLinkedIn(url) {
   return pattern.test(url.trim());
 }
 
-/* ── EXTRACT CANDIDATE NAME ───────────────────────── */
-// Tries to find the candidate name from the first few lines of the CV
-// to personalise the outreach template.
+/**
+ * Heuristically extracts the candidate's name from the top of a CV.
+ *
+ * Strategy: scan the first 5 non-empty lines and return the first line
+ * that looks like a person's name - defined as:
+ *   - 2–4 space-separated tokens (first + last, or first + middle + last)
+ *   - Each token starts with a letter (supports accented characters and
+ *     hyphenated/apostrophe surnames like "O'Brien" or "Muller-Schmidt")
+ *   - No digits in the line (rules out phone numbers, years, etc.)
+ *   - No contact-info markers (@, http, .com, colon)
+ *   - Line length ≤ 50 characters (rules out job titles on the same line)
+ *
+ * Used to personalise the outreach templates with the candidate's real name
+ * instead of the placeholder "[Your Name]".
+ *
+ * @param {string} text - The full raw CV text.
+ * @returns {string|null} The detected name string, or `null` if no
+ *   confident match is found in the opening lines.
+ */
 function extractCandidateName(text) {
   const lines = text
     .split("\n")
@@ -531,8 +623,20 @@ function extractCandidateName(text) {
   return null;
 }
 
-/* ── EXTRACT TOP SKILLS ───────────────────────────── */
-// Returns the best matched keywords from the CV to use in outreach.
+/**
+ * Picks the top `limit` skill keywords from the analysis result to
+ * personalise outreach template copy.
+ *
+ * Primary source: `result.keywords.matched` - the JD keywords that were
+ * found in the CV, ordered by frequency (most prominent first).
+ *
+ * Fallback (no JD was provided): searches the detected department's
+ * keyword list against the raw CV text and returns any that appear.
+ *
+ * @param {object} result - The analysis result object produced by `analyzeCV`.
+ * @param {number} [limit=3] - Maximum number of skill terms to return.
+ * @returns {string[]} An array of skill keyword strings, up to `limit` entries.
+ */
 function extractTopSkills(result, limit = 3) {
   if (result.keywords && result.keywords.matched.length > 0) {
     return result.keywords.matched.slice(0, limit).map((m) => m.word);
@@ -547,9 +651,36 @@ function extractTopSkills(result, limit = 3) {
     .map(({ w }) => w);
 }
 
-/* ── MAIN ANALYSIS ENGINE ─────────────────────────── */
+/* -- MAIN ANALYSIS ENGINE --------------------------- */
 // Broken into named sub-functions for clarity and future Web Worker migration.
 
+/**
+ * Evaluates the physical file's ATS-friendliness independent of its text
+ * content. Checks three criteria and deducts from a base score of 100:
+ *
+ *   1. **Filename** (−20 if has spaces, special chars, or is generic like "CV.pdf")
+ *      ATS databases associate documents with candidates by filename;
+ *      spaces and symbols can be stripped or garbled.
+ *
+ *   2. **File type** (−30 for unsupported format, −10 for .txt)
+ *      .pdf and .docx have the broadest ATS compatibility; .txt loses
+ *      all formatting metadata.
+ *
+ *   3. **File size** (−10 if > 5 MB)
+ *      Portals commonly reject oversized files silently; embedded images
+ *      or fonts are the usual culprits.
+ *
+ * Side effects: appends detected issues and suggestions to the shared
+ * `issues` and `suggestions` arrays, and sets boolean flags used by the
+ * dynamic checklist generator.
+ *
+ * @param {string}   fileName       - Original filename as reported by the browser.
+ * @param {number}   fileSizeInBytes - File size in bytes.
+ * @param {object[]} issues         - Shared issues array to append warnings to.
+ * @param {object[]} suggestions    - Shared suggestions array to append tips to.
+ * @param {object}   flags          - Shared flags object; sets `badFileName` and `largeFile`.
+ * @returns {{ fnScore: number, fileQualityCategories: object[] }}
+ */
 function scoreFileQuality(
   fileName,
   fileSizeInBytes,
@@ -656,6 +787,35 @@ function scoreFileQuality(
   return { fnScore, fileQualityCategories };
 }
 
+/**
+ * Analyses the extracted text for ATS-hostile formatting patterns that
+ * survive PDF/DOCX extraction as text artefacts. Checks four patterns
+ * and deducts from a base score of 100:
+ *
+ *   1. **Multi-column layout** (−15) - detected by many lines containing
+ *      multiple large whitespace gaps, which indicates side-by-side columns.
+ *      ATS parsers read left-to-right linearly and will merge column text.
+ *
+ *   2. **Table/grid structures** (−10) - detected by pipe character density
+ *      or lines with multiple large tab/space alignments. Table cells are
+ *      read in unpredictable order by many parsers.
+ *
+ *   3. **Floating text boxes** (−10) - detected by textbox/frame keywords
+ *      left behind by Word's extraction. Content inside text boxes is
+ *      invisible to most ATS engines.
+ *
+ *   4. **Graphic/image elements** (−10) - detected by image-format keywords
+ *      (svg, png, icon, etc.). Visual skill bars and icons are stripped,
+ *      leaving skill sections empty in the parsed output.
+ *
+ * @param {string}   text       - Original (case-preserved) CV text.
+ * @param {string}   lowerText  - Lowercase version for case-insensitive matching.
+ * @param {object[]} issues     - Shared issues array.
+ * @param {object[]} suggestions - Shared suggestions array.
+ * @param {object}   flags      - Shared flags; sets `multiColumn`, `hasTables`,
+ *                                `textBoxes`, `hasGraphics`.
+ * @returns {{ fmtScore: number, formattingCategories: object[] }}
+ */
 function scoreFormatting(text, lowerText, issues, suggestions, flags) {
   let fmtScore = 100;
   const formattingCategories = [];
@@ -769,6 +929,34 @@ function scoreFormatting(text, lowerText, issues, suggestions, flags) {
   return { fmtScore, formattingCategories };
 }
 
+/**
+ * Scores how easily an ATS can parse the structure and contact data of
+ * the CV. Deducts from a base score of 100 across four checks:
+ *
+ *   1. **Standard section headers** (−20 for missing, −10 for creative names)
+ *      ATS maps employment history and qualifications by scanning for known
+ *      section labels like "Experience" and "Education".
+ *
+ *   2. **Date format consistency** (−10 if > 2 different date styles found)
+ *      Mixed formats (e.g. "Jan 2022" alongside "01/2022") confuse tenure
+ *      calculation algorithms.
+ *
+ *   3. **Bullet point density** (−15 if ≤ 3 bullets total)
+ *      ATS keyword extraction is optimised for bulleted lines; prose
+ *      paragraphs reduce keyword surface area.
+ *
+ *   4. **Contact information** (−6 per missing field: Email, Phone, LinkedIn)
+ *      Recruiters and ATS cannot route applications without contact details;
+ *      a malformed LinkedIn URL incurs a smaller −5 penalty.
+ *
+ * @param {string}   text       - Original CV text.
+ * @param {string}   lowerText  - Lowercase CV text.
+ * @param {object[]} issues     - Shared issues array.
+ * @param {object[]} suggestions - Shared suggestions array.
+ * @param {object}   flags      - Shared flags; sets `missingHeaders`, `weakHeaders`,
+ *                                `mixedDates`, `fewBullets`, `missingContact`, `badLinkedIn`.
+ * @returns {{ readScore: number, readabilityCategories: object[] }}
+ */
 function scoreReadability(text, lowerText, issues, suggestions, flags) {
   let readScore = 100;
   const readabilityCategories = [];
@@ -981,6 +1169,40 @@ function scoreReadability(text, lowerText, issues, suggestions, flags) {
   return { readScore, readabilityCategories };
 }
 
+/**
+ * Evaluates the quality and substance of the CV's written content.
+ * Deducts from a base score of 100 across five checks:
+ *
+ *   1. **Professional summary** (−10 if absent)
+ *      Many ATS systems surface the opening summary as the recruiter preview.
+ *
+ *   2. **Quantified achievements** (−15 if no metrics found)
+ *      Numbers (percentages, currency, team sizes) make accomplishments
+ *      concrete and are weighted higher by ATS ranking algorithms.
+ *
+ *   3. **Certifications & credentials** - advisory only, no score deduction.
+ *      Department-specific note shown when none are detected.
+ *
+ *   4. **Projects / Portfolio** - advisory only.
+ *      Especially flagged for Software Development roles.
+ *
+ *   5. **Keyword stuffing** (−10) - uses `stuffingThreshold` to detect
+ *      any non-stopword that exceeds the adaptive repetition limit for
+ *      this document length. Identifies the worst offending word.
+ *
+ *   6. **Excessive all-caps text** (−5 if > 12 all-caps words, excluding
+ *      known tech acronyms like REACT, SQL, etc.) - disrupts tokenisation.
+ *
+ * @param {string}   text         - Original CV text.
+ * @param {string}   lowerText    - Lowercase CV text.
+ * @param {number}   wordCount    - Total word count of the CV.
+ * @param {string}   detectedDept - Department name from `detectDepartment`.
+ * @param {object[]} issues       - Shared issues array.
+ * @param {object[]} suggestions  - Shared suggestions array.
+ * @param {object}   flags        - Shared flags; sets `noSummary`, `noMetrics`,
+ *                                  `stuffedKeyword`.
+ * @returns {{ cntScore: number, contentCategories: object[] }}
+ */
 function scoreContent(
   text,
   lowerText,
@@ -1178,6 +1400,35 @@ function scoreContent(
   return { cntScore, contentCategories };
 }
 
+/**
+ * Computes a JD keyword match score by stem-matching the top 25 keywords
+ * from the job description against the CV text. Only runs when a
+ * job description of meaningful length (> 10 characters) is provided.
+ *
+ * Algorithm:
+ *   1. Tokenise and stem the JD; count frequency per stem (capped at 3
+ *      per term to neutralise stuffed JDs).
+ *   2. Take the top 25 stems by frequency as the target keyword set.
+ *   3. Stem every word in the CV and count occurrences.
+ *   4. For each target keyword: mark as "matched" (in CV) or "missing".
+ *   5. Compute `matchPercentage = matched / total × 100`.
+ *   6. Build a density heatmap: classify each matched word as "good"
+ *      (≤ 3% of document) or "stuffed" (> 3%).
+ *
+ * Stemming means "engineer" in the CV satisfies "engineering" in the JD,
+ * so matches are semantic rather than purely literal.
+ *
+ * @param {string}   lowerText      - Lowercase CV text.
+ * @param {number}   wordCount      - CV word count (for density calculation).
+ * @param {string}   jobDescription - Raw job description text.
+ * @param {object[]} issues         - Shared issues array.
+ * @param {object[]} suggestions    - Shared suggestions array.
+ * @param {object}   flags          - Shared flags; sets `hasJD`.
+ * @returns {{ keywordsResult: object|null, jdKwScore: number }}
+ *   `keywordsResult` is `null` when no JD is provided; otherwise contains
+ *   `matchPercentage`, `matched`, `missing`, and `density` arrays.
+ *   `jdKwScore` is the numeric match percentage (0 when no JD).
+ */
 function scoreKeywords(
   lowerText,
   wordCount,
@@ -1262,6 +1513,37 @@ function scoreKeywords(
   return { keywordsResult, jdKwScore: matchPct };
 }
 
+/**
+ * Main CV analysis orchestrator. Runs all five sub-scorers in sequence,
+ * then combines their outputs into a single weighted final score.
+ *
+ * Scoring pipeline:
+ *   1. `detectDepartment`  - identifies industry for contextual feedback
+ *   2. `scoreFileQuality`  - filename, format, file size
+ *   3. `scoreFormatting`   - columns, tables, text boxes, graphics
+ *   4. `scoreReadability`  - headers, dates, bullets, contact info
+ *   5. `scoreContent`      - summary, metrics, stuffing, all-caps
+ *   6. `scoreKeywords`     - JD keyword match (only if JD provided)
+ *
+ * Adaptive weight system:
+ *   - With JD: keywords 35%, readability 25%, content 20%, formatting 15%,
+ *              file 5%
+ *   - Text/paste mode (no file): readability 40%, content 35%, formatting 20%,
+ *                                 file 5%
+ *   - Standard (file, no JD): readability 35%, content 30%, formatting 20%,
+ *                              file 15%
+ *
+ * The returned result object is self-contained - it includes all category
+ * arrays, the raw issues/suggestions lists, flags, score breakdown rows,
+ * and the candidate name for outreach personalisation.
+ *
+ * @param {string} rawText        - Extracted CV text.
+ * @param {string} fileName       - Original file name (used for file quality scoring).
+ * @param {number} fileSizeInBytes - File size in bytes.
+ * @param {string} fileType       - Lowercase file extension ("pdf", "docx", "txt", "rtf").
+ * @param {string} jobDescription - Optional job description text; pass "" to skip JD scoring.
+ * @returns {object} Full analysis result object stored in `state.result`.
+ */
 function analyzeCV(
   rawText,
   fileName,
@@ -1277,11 +1559,11 @@ function analyzeCV(
     suggestions = [],
     flags = {}; // flags drive dynamic checklist
 
-  // ── 1. DEPARTMENT (weighted + confidence) ──────────
+  // -- 1. DEPARTMENT (weighted + confidence) ----------
   const { dept: detectedDept, confidence: deptConfidence } =
     detectDepartment(text);
 
-  // ── 2–6. SUB-SCORED SECTIONS ───────────────────────
+  // -- 2–6. SUB-SCORED SECTIONS -----------------------
   const { fnScore, fileQualityCategories } = scoreFileQuality(
     fileName,
     fileSizeInBytes,
@@ -1320,7 +1602,7 @@ function analyzeCV(
     suggestions,
     flags
   );
-  // ── 7. ADAPTIVE SCORE WEIGHTS ──────────────────────
+  // -- 7. ADAPTIVE SCORE WEIGHTS ----------------------
   // Weights shift based on what information is available and which CV type.
   // If JD present: keywords carry 40%; without JD: content carries more.
   // More lenient on content for file-only submissions (no paste = less text to analyze).
@@ -1442,7 +1724,16 @@ function analyzeCV(
   };
 }
 
-/* ── HTML ESCAPE HELPER ───────────────────────────── */
+/**
+ * Escapes HTML special characters in a string so user-supplied content
+ * (filenames, CV text snippets, keyword names) can be safely injected
+ * into innerHTML without creating XSS vectors.
+ *
+ * Replaces: & → &amp;  < → &lt;  > → &gt;  " → &quot;  ' → &#39;
+ *
+ * @param {string} str - The raw string to escape.
+ * @returns {string} The HTML-safe escaped string, or "" for falsy input.
+ */
 function escapeHtml(str) {
   if (!str) return "";
   return String(str)
@@ -1453,7 +1744,7 @@ function escapeHtml(str) {
     .replace(/'/g, "&#39;");
 }
 
-/* ── SVG ICONS ────────────────────────────────────── */
+/* -- SVG ICONS -------------------------------------- */
 const Icons = {
   check: `<svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>`,
   warn: `<svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>`,
@@ -1477,6 +1768,13 @@ const Icons = {
   star: `<svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>`,
 };
 
+/**
+ * Returns the appropriate coloured icon wrapper HTML for a check status.
+ * Used in the Pattern Rules tab to prefix each check-row.
+ *
+ * @param {"pass"|"warning"|"fail"} status
+ * @returns {string} HTML string containing a coloured SVG icon div.
+ */
 function statusIcon(status) {
   if (status === "pass")
     return `<div class="check-icon-wrap pass" aria-label="Passed">${Icons.check}</div>`;
@@ -1484,17 +1782,52 @@ function statusIcon(status) {
     return `<div class="check-icon-wrap warn" aria-label="Warning">${Icons.warn}</div>`;
   return `<div class="check-icon-wrap fail" aria-label="Critical">${Icons.fail}</div>`;
 }
+/**
+ * Returns a coloured pill badge HTML element for a check status.
+ * Displayed inline next to the check title in the Pattern Rules tab.
+ *
+ * @param {"pass"|"warning"|"fail"} status
+ * @returns {string} HTML string for the badge span.
+ */
 function statusBadge(status) {
   if (status === "pass") return `<span class="status-badge pass">Passed</span>`;
   if (status === "warning")
     return `<span class="status-badge warn">Warning</span>`;
   return `<span class="status-badge fail">Critical</span>`;
 }
+/**
+ * Counts how many items in a category-check array have a "pass" status.
+ * Used to compute the pass/total fraction shown in the Category Matrix
+ * bars and the Pattern Rules header.
+ *
+ * @param {object[]} arr - Array of category check objects with a `status` property.
+ * @returns {number} Count of items whose `status` equals "pass".
+ */
 function passCount(arr) {
   return arr.filter((c) => c.status === "pass").length;
 }
 
-/* ── SCORE RING ───────────────────────────────────── */
+/**
+ * Generates the SVG score ring HTML for the dashboard's left panel.
+ *
+ * The ring is a standard SVG circle with a stroke-dashoffset technique:
+ *   - Full circumference = full circle
+ *   - offset = circumference − (score/100 × circumference)
+ * A lower offset means more of the arc is visible.
+ *
+ * Ring colour:
+ *   - score < 50  → red
+ *   - score < 75  → orange
+ *   - score ≥ 75  → green
+ *
+ * If `state.scoreAnimated` is true (e.g. after a tab switch re-render),
+ * the arc is drawn at its final position immediately - no CSS transition -
+ * to avoid a flash of the empty ring on every re-render. The animation
+ * itself (`animateScore`) should only run once per fresh analysis.
+ *
+ * @param {number} score - The final ATS score (0–100).
+ * @returns {string} HTML string containing the SVG ring and score label.
+ */
 function buildRing(score) {
   const size = 150,
     sw = 10,
@@ -1538,6 +1871,22 @@ function buildRing(score) {
 </div>`;
 }
 
+/**
+ * Animates the score ring arc and the numeric counter from 0 to `target`.
+ *
+ * Two concurrent animations are kicked off:
+ *   1. **Arc** - a CSS transition on `stroke-dashoffset` is triggered by
+ *      setting the property to its final value inside a rAF callback,
+ *      giving the browser one paint tick to register the starting value.
+ *   2. **Counter** - a `setInterval` increments the displayed number
+ *      roughly every 16 ms (≈ 60 fps) in steps of `ceil(target/60)`,
+ *      so the counter always reaches `target` in about 60 frames (~1 s).
+ *
+ * Sets `state.scoreAnimated = true` on first call so subsequent
+ * re-renders (tab switches, re-runs) skip the animation.
+ *
+ * @param {number} target - The final score value to animate to.
+ */
 function animateScore(target) {
   if (state.scoreAnimated) return; // animation already played - arc is already visible at final position
   const arc = document.getElementById("score-ring-arc");
@@ -1556,10 +1905,21 @@ function animateScore(target) {
   }, 16);
 }
 
-/* ── PERSONALISED OUTREACH ────────────────────────── */
-/* Convert a plain-text outreach string to safe HTML for injection
-   into a contenteditable div. Blank lines → paragraph breaks,
-   single newlines → line breaks. HTML special chars are escaped. */
+/**
+ * Converts a plain-text outreach template string to safe HTML suitable
+ * for injection into a `contenteditable` div.
+ *
+ * Transformation rules:
+ *   - HTML special chars (&, <, >) are escaped to prevent XSS.
+ *   - Double newlines (\n\n) → `<br><br>` (paragraph spacing).
+ *   - Single newlines (\n)   → `<br>` (line breaks within a paragraph).
+ *
+ * The `contenteditable` div uses innerHTML, so raw newlines would be
+ * collapsed by the browser; `<br>` tags are required to preserve spacing.
+ *
+ * @param {string} text - Plain-text outreach template.
+ * @returns {string} HTML-escaped string with `<br>` line break markup.
+ */
 function textToOutreachHtml(text) {
   const escaped = text
     .replace(/&/g, "&amp;")
@@ -1569,6 +1929,24 @@ function textToOutreachHtml(text) {
   return escaped.replace(/\n\n/g, "<br><br>").replace(/\n/g, "<br>");
 }
 
+/**
+ * Generates a personalised outreach message template for the given
+ * department and channel using the candidate's detected name and top skills.
+ *
+ * Two channel variants:
+ *   - **"linkedin"** - a short, casual DM (< 100 words) appropriate for
+ *     LinkedIn's character limits and conversational tone.
+ *   - **"email"**    - a longer cold email with a suggested subject line,
+ *     professional salutation, and a phone/email/LinkedIn sign-off block.
+ *
+ * Placeholders `[Hiring Manager]`, `[Company]`, `[Phone]`, etc. are left
+ * in the template for the user to fill in before sending.
+ *
+ * @param {string} dept    - Detected department name (e.g. "Software Development & IT").
+ * @param {string} channel - Output channel: "linkedin" or "email".
+ * @param {object} result  - The analysis result object (used for name + skills extraction).
+ * @returns {string} HTML-escaped outreach template ready for `contenteditable` injection.
+ */
 function getOutreachText(dept, channel, result) {
   const name = result?.candidateName || "[Your Name]";
   const skills = result ? extractTopSkills(result) : [];
@@ -1591,8 +1969,22 @@ function getOutreachText(dept, channel, result) {
   return textToOutreachHtml(plain);
 }
 
-/* ── DYNAMIC TASKS ────────────────────────────────── */
-// Generates tasks with CV-specific context based on flags + result data.
+/**
+ * Builds the personalised CV readiness checklist for the Playbook tab.
+ *
+ * Each task in `ALL_TASKS` is associated with a `flag` key. Only tasks
+ * whose flag was set to `true` by the analysis (or whose `alwaysShow`
+ * property is true) are included in the returned list - so the checklist
+ * contains only items that are actually relevant to this specific CV.
+ *
+ * Tasks include context-aware labels (e.g. the actual stuffed keyword,
+ * the actual bad filename) for a precise, actionable experience.
+ *
+ * @param {object} flags  - The `flags` object from the analysis result.
+ * @param {object} result - The full analysis result (used for filename, dept, etc.).
+ * @returns {object[]} Filtered array of task objects, each with:
+ *   `id`, `flag`, `label`, `impact`, `desc`, and optionally `alwaysShow`.
+ */
 function getDynamicTasks(flags, result) {
   const ext = result && result.fileType ? result.fileType : "pdf";
   const stuffed = flags.stuffedKeyword || "a keyword";
@@ -1731,8 +2123,31 @@ function getDynamicTasks(flags, result) {
   return ALL_TASKS.filter((t) => t.alwaysShow || (t.flag && flags[t.flag]));
 }
 
-/* ── REPORT EXPORT ────────────────────────────────── */
-/* ── DASHBOARD RENDERER ───────────────────────────── */
+/**
+ * The main dashboard renderer. Builds the full dashboard HTML from the
+ * analysis result and injects it into `#dashboard-section`.
+ *
+ * Structure rendered:
+ *   - Header bar (title, filename, department, Re-run / New Analysis buttons)
+ *   - Left panel: score ring, score breakdown panel, category matrix bars
+ *   - Right panel: tab bar + active tab content
+ *
+ * Contains five inner tab-builder functions (called lazily - only the
+ * active tab's function runs on each render):
+ *   - `tabOverview()`   - department banner, top suggestions, privacy note
+ *   - `tabBoost()`      - dynamic checklist + personalised outreach templates
+ *   - `tabFormatting()` - pattern rules / ATS check grid
+ *   - `tabIssues()`     - detected warnings and fix instructions
+ *   - `tabKeywords()`   - JD keyword match rate, missing chips, density heatmap
+ *
+ * Also contains `buildScorePanel()` which renders the collapsible score
+ * breakdown panel explaining how the weighted final score was calculated.
+ *
+ * After injecting HTML, schedules `animateScore` via rAF + setTimeout(50)
+ * to ensure the DOM is painted before the animation starts.
+ *
+ * @param {object} result - The full analysis result object from `analyzeCV`.
+ */
 function renderDashboard(result) {
   const scoreClass =
     result.score < 50 ? "red" : result.score < 75 ? "orange" : "green";
@@ -1762,7 +2177,7 @@ function renderDashboard(result) {
     })
     .join("");
 
-  // ── Score breakdown panel ──────────────────────────
+  // -- Score breakdown panel --------------------------
   function buildScorePanel() {
     return `
 <div class="score-breakdown-panel" id="score-breakdown" aria-label="Score explanation">
@@ -1791,7 +2206,7 @@ function renderDashboard(result) {
 </div>`;
   }
 
-  // ── Tab: Overview ──────────────────────────────────
+  // -- Tab: Overview ----------------------------------
   function tabOverview() {
     const sugs =
       result.suggestions.length > 0
@@ -1842,7 +2257,7 @@ function renderDashboard(result) {
 </div>`;
   }
 
-  // ── Tab: Boost / Playbook ──────────────────────────
+  // -- Tab: Boost / Playbook --------------------------
   function tabBoost() {
     const dynamicTasks = getDynamicTasks(result.flags || {}, result);
     // Pre-complete tasks that already pass
@@ -1953,7 +2368,7 @@ function renderDashboard(result) {
 </div>`;
   }
 
-  // ── Tab: Pattern Rules ─────────────────────────────
+  // -- Tab: Pattern Rules -----------------------------
   function tabFormatting() {
     function section(arr, label) {
       const hasWarn = arr.some((c) => c.status !== "pass");
@@ -1996,7 +2411,7 @@ function renderDashboard(result) {
 </div>`;
   }
 
-  // ── Tab: Warnings ──────────────────────────────────
+  // -- Tab: Warnings ----------------------------------
   function tabIssues() {
     const n = result.issues.length;
     const cards =
@@ -2043,7 +2458,7 @@ function renderDashboard(result) {
 <div role="list">${cards}</div>`;
   }
 
-  // ── Tab: Keywords ──────────────────────────────────
+  // -- Tab: Keywords ----------------------------------
   function tabKeywords() {
     if (!result.keywords) {
       return `<div class="empty-state" style="padding:48px 0;text-align:center;">
@@ -2240,7 +2655,17 @@ ${
   saveSession();
 }
 
-/* ── SAVE OUTREACH EDIT ───────────────────────────── */
+/**
+ * Reads the current content of the `contenteditable` outreach template
+ * div and persists it into `state.outreachEdits[channel]`.
+ *
+ * Uses `innerHTML` (not `innerText`) so that `<br>` line breaks are
+ * preserved when the user switches between LinkedIn and email channels.
+ * Plain `innerText` is used separately when copying to the clipboard.
+ *
+ * Called before every tab switch and channel switch to ensure the user's
+ * edits are not lost when the dashboard re-renders.
+ */
 function saveOutreachEdit() {
   const el = document.getElementById("outreach-text");
   if (!el) return;
@@ -2249,7 +2674,27 @@ function saveOutreachEdit() {
   state.outreachEdits[state.outreachChannel] = el.innerHTML || null;
 }
 
-/* ── EVENT DELEGATION ─────────────────────────────── */
+/**
+ * Central event delegation handler attached to `document`.
+ *
+ * Instead of attaching individual listeners to every button (many of which
+ * are created dynamically by `renderDashboard`), this single listener
+ * captures all clicks via event bubbling and routes them by the
+ * `data-action` attribute of the closest ancestor element.
+ *
+ * Actions handled:
+ *   - "reset"            → `resetDashboard()` - show upload view
+ *   - "rerun"            → re-run `analyzeCV` with current state data
+ *   - "switch-tab"       → change active tab, re-render, move focus for a11y
+ *   - "set-channel"      → switch outreach template (linkedin / email)
+ *   - "toggle-task"      → check/uncheck a checklist item, persist to state
+ *   - "copy-outreach"    → copy template text to clipboard
+ *   - "toggle-breakdown" → expand/collapse the score breakdown panel
+ *   - "clear-jd"         → clear the job description field
+ *   - "report-feedback"  → open feedback email in mail client
+ *
+ * Also closes the score breakdown panel when clicking anywhere outside it.
+ */
 document.addEventListener("click", function (e) {
   const t = e.target.closest("[data-action]");
   if (!t) {
@@ -2342,7 +2787,21 @@ document.addEventListener("click", function (e) {
   }
 });
 
-// Keyboard: Enter/Space on task items
+/**
+ * Keyboard accessibility handler for interactive components.
+ *
+ * - **Enter / Space** on task items (`[data-action="toggle-task"]`):
+ *   Triggers a click so keyboard users can check/uncheck checklist items
+ *   without a mouse. Default behaviour (page scroll on Space) is suppressed.
+ *
+ * - **Enter / Space** on tab buttons (`[data-action="switch-tab"]`):
+ *   Ensures tab buttons are keyboard-activatable consistent with ARIA
+ *   tab role expectations.
+ *
+ * - **ArrowLeft / ArrowRight** within the tab bar:
+ *   Implements the ARIA Tabs pattern - arrow keys cycle focus between tabs
+ *   and activate them, making the tab bar fully operable without a mouse.
+ */
 document.addEventListener("keydown", function (e) {
   if (e.key === "Enter" || e.key === " ") {
     const t = e.target.closest("[data-action='toggle-task']");
@@ -2377,6 +2836,16 @@ document.addEventListener("keydown", function (e) {
   }
 });
 
+/**
+ * Clipboard copy fallback for browsers where `navigator.clipboard.writeText`
+ * is unavailable (e.g. non-HTTPS contexts or older browsers).
+ *
+ * Creates an off-screen textarea, sets its value, selects all its text,
+ * and executes the legacy `document.execCommand('copy')` command.
+ * The textarea is removed from the DOM immediately after.
+ *
+ * @param {string} text - The plain text to copy to the clipboard.
+ */
 function fallbackCopy(text) {
   const ta = document.createElement("textarea");
   ta.value = text;
@@ -2390,6 +2859,14 @@ function fallbackCopy(text) {
   } catch (_) {}
   document.body.removeChild(ta);
 }
+/**
+ * Provides transient visual copy confirmation by temporarily replacing
+ * the copy button label with "Copied!" then restoring the original text
+ * after 2.2 seconds.
+ *
+ * @param {HTMLElement} label - The `<span>` element inside the copy button
+ *   whose text content is changed.
+ */
 function flashLabel(label) {
   label.textContent = "Copied!";
   setTimeout(() => {
@@ -2397,7 +2874,16 @@ function flashLabel(label) {
   }, 2200);
 }
 
-/* ── VIEW MANAGEMENT ──────────────────────────────── */
+/**
+ * Switches the view from the upload screen to the analysis dashboard.
+ *
+ * Stores the result in `state.result`, resets the score animation flag
+ * so the ring animates fresh on this new result, then hides the hero/
+ * upload/explainer sections and reveals `#dashboard-section` before
+ * calling `renderDashboard` to build its content.
+ *
+ * @param {object} result - The analysis result object from `analyzeCV`.
+ */
 function showDashboard(result) {
   state.result = result;
   state.scoreAnimated = false; // Reset so animation plays fresh
@@ -2408,6 +2894,18 @@ function showDashboard(result) {
   renderDashboard(result);
 }
 
+/**
+ * Resets the entire application back to the initial upload state.
+ *
+ * Clears analysis result, active tab, score animation flag, and any
+ * outreach edits from `state`, removes the session snapshot from
+ * sessionStorage, empties `#dashboard-section` innerHTML, then shows
+ * the hero/upload/explainer sections again.
+ *
+ * Also calls `attachUploadListeners()` to ensure the upload form is
+ * interactive - it may have been skipped by `DOMContentLoaded` when
+ * the app restored from a session and jumped straight to the dashboard.
+ */
 function resetDashboard() {
   state.result = null;
   state.activeTab = "overview";
@@ -2423,7 +2921,16 @@ function resetDashboard() {
   attachUploadListeners();
 }
 
-/* ── MODE TOGGLE ──────────────────────────────────── */
+/**
+ * Switches the CV input method between "File Drop" and "Direct Editor" modes.
+ *
+ * Updates `state.inputMode`, toggles the `active` class and `aria-checked`
+ * attribute on the mode toggle buttons, and shows/hides the dropzone or
+ * textarea wrapper accordingly. Also re-evaluates the analyze button state
+ * since switching modes may change whether there is usable CV text.
+ *
+ * @param {"upload"|"text"} mode - The target input mode to activate.
+ */
 function setMode(mode) {
   state.inputMode = mode;
   const uploadBtn = document.getElementById("mode-upload");
@@ -2441,7 +2948,12 @@ function setMode(mode) {
   updateAnalyzeBtn();
 }
 
-/* ── FEEDBACK HELPERS ─────────────────────────────── */
+/**
+ * Renders a styled feedback banner inside `#feedback-wrap`.
+ *
+ * @param {"success"|"error"} type - Controls the banner colour and icon.
+ * @param {string} msg - The message text to display inside the banner.
+ */
 function showFeedback(type, msg) {
   const icon =
     type === "error"
@@ -2451,15 +2963,39 @@ function showFeedback(type, msg) {
     "feedback-wrap"
   ).innerHTML = `<div class="feedback-banner ${type}" role="alert">${icon}<span>${msg}</span></div>`;
 }
+/**
+ * Replaces the feedback area with an animated progress spinner and
+ * a status message. Used during file reading to show which parsing
+ * step is in progress (e.g. "Extracting page 2 of 5…").
+ *
+ * Uses `aria-live="polite"` so screen readers announce progress updates.
+ *
+ * @param {string} msg - The progress step message to display.
+ */
 function showProgress(msg) {
   document.getElementById(
     "feedback-wrap"
   ).innerHTML = `<div class="feedback-banner progress" role="status" aria-live="polite"><div class="progress-spinner"></div><span>${msg}</span></div>`;
 }
+/**
+ * Clears any visible feedback or progress banner from `#feedback-wrap`.
+ * Called at the start of a new file processing operation to remove stale messages.
+ */
 function clearFeedback() {
   document.getElementById("feedback-wrap").innerHTML = "";
 }
 
+/**
+ * Enables or disables the "Perform ATS Check" button based on whether
+ * `state.cvText` contains any non-whitespace content.
+ *
+ * Also toggles the CSS class between "ready" (green, clickable) and
+ * "disabled" (muted, not clickable) so styling stays in sync with the
+ * button's disabled state.
+ *
+ * Called whenever CV text changes - on file upload, textarea input, or
+ * after a mode switch.
+ */
 function updateAnalyzeBtn() {
   const btn = document.getElementById("analyze-btn");
   const has = state.cvText.trim().length > 0;
@@ -2467,7 +3003,35 @@ function updateAnalyzeBtn() {
   btn.className = "cta-btn " + (has ? "ready" : "disabled");
 }
 
-/* ── FILE PROCESSING ──────────────────────────────── */
+/**
+ * Handles file ingestion for all supported CV formats. Reads the file
+ * entirely in the browser - no server upload occurs.
+ *
+ * Format-specific extraction strategies:
+ *
+ *   - **TXT** - `file.text()` reads UTF-8 plain text directly.
+ *
+ *   - **RTF** - `file.text()` reads raw RTF markup, then regex-based
+ *     stripping removes control words (`\par`, `\pard`, `\word`),
+ *     curly braces, and excess whitespace. Warns the user that RTF
+ *     extraction is approximate and PDF/DOCX is preferred.
+ *
+ *   - **DOCX** - Delegates to Mammoth.js (`mammoth.extractRawText`),
+ *     which converts the OOXML document to plain text in-browser.
+ *
+ *   - **PDF** - Delegates to PDF.js (`pdfjsLib.getDocument`).
+ *     Each page's text items are sorted by Y-position (top→bottom) then
+ *     X-position (left→right) before joining, restoring natural reading
+ *     order that PDF.js sometimes returns out of sequence.
+ *     Throws a user-friendly error for image-only/scanned PDFs with < 10
+ *     characters of selectable text.
+ *
+ * Progress banners are shown during long operations (multi-page PDFs).
+ * On success, `state.cvText` is updated and the analyze button enabled.
+ * On failure, an error banner is shown and the dropzone is reset.
+ *
+ * @param {File} file - The File object from the input change or drop event.
+ */
 async function processFile(file) {
   clearFeedback();
   state.cvFileName = file.name;
@@ -2489,7 +3053,7 @@ async function processFile(file) {
     if (ext === "txt" || ext === "rtf") {
       showProgress("Extracting text…");
       let text = await file.text();
-      // Strip RTF control codes if RTF — preserve line breaks for section detection
+      // Strip RTF control codes if RTF - preserve line breaks for section detection
       if (ext === "rtf") {
         // Replace RTF paragraph marks (\par, \pard) with newlines before stripping
         text = text
@@ -2508,12 +3072,11 @@ async function processFile(file) {
           "success",
           `Read ${file.name} (${formatBytes(
             file.size
-          )}) — RTF extraction is approximate; PDF or DOCX gives more accurate scores.`
+          )}) - RTF extraction is approximate; PDF or DOCX gives more accurate scores.`
         );
       }
       state.cvText = text;
       dzSub.textContent = "File loaded. Drop another to replace.";
-      // RTF already showed its own feedback with accuracy caveat above
       if (ext !== "rtf") {
         showFeedback(
           "success",
@@ -2592,8 +3155,29 @@ async function processFile(file) {
   }
 }
 
-/* ── EVENT LISTENERS ──────────────────────────────── */
-let _uploadListenersAttached = false;
+/**
+ * Attaches all event listeners for the upload section UI. Uses a guard flag
+ * (`_uploadListenersAttached`) to ensure listeners are only attached once -
+ * the function may be called from both `DOMContentLoaded` and `resetDashboard`,
+ * and double-attaching would cause every event to fire twice.
+ *
+ * Listeners registered:
+ *   - Mode toggle buttons ("File Drop" / "Direct Editor") → `setMode()`
+ *   - File input `change` → `processFile()` on selected file
+ *   - Dropzone `dragenter` / `dragover` → adds `.drag-over` highlight class
+ *   - Dropzone `dragleave` / `drop` → removes `.drag-over` highlight class
+ *   - Dropzone `drop` → `processFile()` on dropped file
+ *   - Document `dragend` → clears stuck `.drag-over` if cursor leaves window
+ *   - CV textarea `input` → syncs `state.cvText`, updates char/word counters,
+ *     calls `updateAnalyzeBtn`, debounce-saves session
+ *   - JD textarea `input` → syncs `state.jobDescription`, updates char counter,
+ *     shows/hides the JD clear button, debounce-saves session
+ *   - JD clear button `click` → clears JD state, field, and counter
+ *   - Analyze button `click` → shows spinner, runs `analyzeCV` via setTimeout(0)
+ *     so the browser can paint the spinner before the synchronous analysis
+ *     blocks the main thread, then calls `showDashboard` with the result.
+ *     Also pings the anonymous Cloudflare counter worker once per page session.
+ */
 function attachUploadListeners() {
   if (_uploadListenersAttached) return;
   _uploadListenersAttached = true;
@@ -2718,6 +3302,23 @@ function attachUploadListeners() {
   });
 }
 
+/**
+ * Application bootstrap - runs once when the DOM is fully parsed.
+ *
+ * Two paths:
+ *
+ *   1. **Session restore** - if `loadSession()` finds a saved snapshot in
+ *      sessionStorage and it contains a completed analysis result, the
+ *      dashboard is shown immediately (the user is returned to where they
+ *      left off before the reload). Form fields are also restored:
+ *        - Textarea mode: CV text and counters are re-populated.
+ *        - JD field: text and character count are restored; clear button shown.
+ *        - Dropzone: filename label is restored to reflect the uploaded file.
+ *      Upload listeners are still attached so "New Analysis" works correctly.
+ *
+ *   2. **Fresh start** - no session (or session has no result): attach upload
+ *      listeners and present the default upload view to the user.
+ */
 document.addEventListener("DOMContentLoaded", function () {
   // Restore session if available
   if (loadSession() && state.result) {
