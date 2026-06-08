@@ -6,6 +6,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>JobFit - Private ATS Analysis</title>
   <link rel="icon" type="image/png" href="icon.png" />
+  <link rel="apple-touch-icon" href="icon.png" />
+  <link rel="manifest" href="manifest.json" />
+  <meta name="theme-color" content="#10b981" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="JobFit" />
   <link rel="stylesheet" href="style.css" />
 </head>
 
@@ -67,11 +73,12 @@
               </svg>
               Zero personal data collected
             </div>
-            <p>This counter uses Cloudflare Web Analytics - an anonymous, privacy-respecting hit counter. It records
+            <p>This counter uses a privacy-respecting anonymous Cloudflare Worker. It records
               <strong>only that a CV was submitted</strong>. No file contents, no resume text, no IP address, no
               cookies, and no personal identifiers are ever transmitted or stored.
             </p>
-            <p style="margin-top:8px;">Reflects <strong>visits over the last 90 days</strong>, not all-time.</p>
+            <p style="margin-top:8px;">The count is <strong>displayed on every visit</strong> (read-only) and
+              <strong>increments once per session</strong> when you run an analysis.</p>
           </div>
         </div>
       </div>
@@ -256,6 +263,24 @@
         });
         popup.addEventListener('click', function (e) { e.stopPropagation(); });
       }
+
+      // ── Counter: read current count on every page load (no increment) ──
+      fetch('https://jobfit-counter.tumelo-segale.workers.dev/?read=1')
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+          var el = document.getElementById('cv-counter-value');
+          if (el && data.count != null) el.textContent = Number(data.count).toLocaleString();
+        })
+        .catch(function () { });
+
+      // ── Service Worker registration ──
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', function () {
+          navigator.serviceWorker.register('./sw.js')
+            .catch(function (err) { console.warn('SW registration failed:', err); });
+        });
+      }
+
     })();
   </script>
 
