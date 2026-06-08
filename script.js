@@ -3288,7 +3288,9 @@ function attachUploadListeners() {
         // only one increment per browser session even across re-runs.
         if (!sessionStorage.getItem("jobfit_pinged")) {
           sessionStorage.setItem("jobfit_pinged", "1");
-          fetch("https://jobfit-counter.tumelo-segale.workers.dev/")
+          fetch("https://jobfit-counter.tumelo-segale.workers.dev/ping", {
+            method: "POST",
+          })
             .then((r) => r.json())
             .then((data) => {
               const el = document.getElementById("cv-counter-value");

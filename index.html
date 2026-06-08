@@ -78,7 +78,8 @@
               cookies, and no personal identifiers are ever transmitted or stored.
             </p>
             <p style="margin-top:8px;">The count is <strong>displayed on every visit</strong> (read-only) and
-              <strong>increments once per session</strong> when you run an analysis.</p>
+              <strong>increments once per session</strong> when you run an analysis.
+            </p>
           </div>
         </div>
       </div>
@@ -265,13 +266,20 @@
       }
 
       // ── Counter: read current count on every page load (no increment) ──
-      fetch('https://jobfit-counter.tumelo-segale.workers.dev/?read=1')
+      var counterEl = document.getElementById('cv-counter-value');
+      if (counterEl) counterEl.textContent = '…';
+      fetch('https://jobfit-counter.tumelo-segale.workers.dev/')
         .then(function (r) { return r.json(); })
         .then(function (data) {
-          var el = document.getElementById('cv-counter-value');
-          if (el && data.count != null) el.textContent = Number(data.count).toLocaleString();
+          if (counterEl && data.count != null) {
+            counterEl.textContent = Number(data.count).toLocaleString();
+          } else if (counterEl) {
+            counterEl.textContent = '—';
+          }
         })
-        .catch(function () { });
+        .catch(function () {
+          if (counterEl) counterEl.textContent = '—';
+        });
 
       // ── Service Worker registration ──
       if ('serviceWorker' in navigator) {
